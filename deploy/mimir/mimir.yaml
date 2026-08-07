@@ -1,0 +1,45 @@
+# Mimir single-binary ("monolithic") mode for local/demo use — filesystem
+# storage, replication_factor 1. Not how you'd run Mimir at scale (that's
+# mimir-distributed + object storage + RF 3), but functionally identical
+# for a single fleet this size. See BUILD_PLAN.md for the tradeoff.
+
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+  log_level: info
+
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/blocks
+  tsdb:
+    dir: /data/tsdb
+
+compactor:
+  data_dir: /data/compactor
+  sharding_ring:
+    kvstore:
+      store: memberlist
+
+distributor:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: memberlist
+
+ingester:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: memberlist
+    replication_factor: 1
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/ruler

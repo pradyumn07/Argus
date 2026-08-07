@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from config import SLO_BY_ENGINE, SLI
+from config import SLO_BY_ENGINE, EngineSLO, SLI
 
 _LEVELS = {0: "healthy", 1: "warning", 2: "critical"}
 _RANK = {"healthy": 0, "warning": 1, "critical": 2}
@@ -41,14 +41,22 @@ def _level(value: float | None, sli: SLI) -> int:
     return 0
 
 
-def classify(sample: MetricSample) -> MetricSample:
-    """Evaluate every SLI against the engine's SLO; status = worst breach."""
+def classify(sample: MetricSample, slo: EngineSLO | None = None) -> MetricSample:
+    """Evaluate every SLI against the SLO; status = worst breach.
+
+    `slo` is the target's resolved SLO (engine defaults plus any per-target
+    overrides from deploy/fleet.yaml). Falls back to the plain engine default
+    so the function stays usable on its own.
+    """
     if sample.unreachable:
         sample.status = "critical"
-        sample.status_reason = "unreachable"
+        # base.py already set a specific reason (e.g. "unreachable: OperationalError");
+        # don't clobber it with a generic string if it's there.
+        if not sample.status_reason:
+            sample.status_reason = "unreachable"
         return sample
 
-    slo = SLO_BY_ENGINE[sample.engine]
+    slo = slo or SLO_BY_ENGINE[sample.engine]
     checks: list[tuple[str, float | None, SLI | None]] = [
         ("latency", sample.latency_ms, slo.latency_ms),
         ("connections", sample.conn_pct, slo.conn_pct),
@@ -72,11 +80,11 @@ def classify(sample: MetricSample) -> MetricSample:
         sample.status_reason = "within slo"
     else:
         # human-readable reason, e.g. "latency 4.1x over slo warn"
-        sample.status_reason = _describe(worst_name, checks, slo)
+        sample.status_reason = _describe(worst_name, checks)
     return sample
 
 
-def _describe(name, checks, slo) -> str:
+def _describe(name, checks) -> str:
     for cname, value, sli in checks:
         if cname == name and value is not None and sli is not None:
             if sli.higher_is_worse:

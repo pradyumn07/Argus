@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: argus-collector
+    static_configs:
+      - targets: ["collector:9100"]
+
+remote_write:
+  - url: http://mimir:9009/api/v1/push

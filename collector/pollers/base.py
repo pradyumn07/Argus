@@ -17,23 +17,25 @@ class Poller(ABC):
         self.instance_id = instance_id
         self.engine = engine
         self._prev: dict[str, float] = {}
-        self._prev_ts: float | None = None
+        # Timestamps are per key, not shared. A poller that rates two counters
+        # in one poll (mongo: ops + asserts; mysql: queries + aborts + conns)
+        # would otherwise measure the second one over ~0s of elapsed time and
+        # report a wildly inflated rate.
+        self._prev_ts: dict[str, float] = {}
 
     def _delta_rate(self, key: str, value: float) -> float | None:
         """Per-second rate of a cumulative counter since the last poll."""
         now = time.monotonic()
         prev = self._prev.get(key)
-        prev_ts = self._prev_ts
+        prev_ts = self._prev_ts.get(key)
         self._prev[key] = value
+        self._prev_ts[key] = now
         if prev is None or prev_ts is None:
-            self._prev_ts = now
             return None
         elapsed = now - prev_ts
-        self._prev_ts = now
         if elapsed <= 0:
             return None
-        d = value - prev
-        return max(0.0, d / elapsed)
+        return max(0.0, (value - prev) / elapsed)
 
     async def poll(self) -> MetricSample:
         """Time the round-trip and gather native stats. Never raises."""
