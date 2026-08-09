@@ -23,6 +23,11 @@ spec:
   template:
     metadata:
       labels: { app: tempo }
+      annotations:
+        # Stamped by k8s/generate.py from the ConfigMap content. Changing
+        # config changes this, which changes the pod template, which is
+        # what actually makes Kubernetes roll the pods. Do not hand-edit.
+        argus.dev/config-hash: "c11584911e613957"
     spec:
       securityContext:
         fsGroup: 10001  # tempo runs as uid 10001; needs to own /var/tempo

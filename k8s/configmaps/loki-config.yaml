@@ -1,7 +1,7 @@
 apiVersion: v1
 data:
   loki.yaml: |
-    # Loki single-binary mode — filesystem storage, replication_factor 1.
+    # Loki single-binary mode â€” filesystem storage, replication_factor 1.
     # Same honest tradeoff as Mimir (see BUILD_PLAN.md): this is not how you'd
     # run Loki at scale (that's the distributed chart + object storage), but
     # the ingest path, the schema, and every LogQL query are identical, so

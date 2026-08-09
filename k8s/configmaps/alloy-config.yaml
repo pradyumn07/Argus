@@ -1,15 +1,15 @@
 apiVersion: v1
 data:
   config.alloy: |
-    // Grafana Alloy — Kubernetes variant.
+    // Grafana Alloy â€” Kubernetes variant.
     //
     // This is a SEPARATE file from config.alloy (the docker-compose one) on
     // purpose, and it's the one real deviation in the Phase 3 k8s translation:
     // log discovery is genuinely different between the two runtimes. Compose
     // discovers containers over the Docker socket; here Alloy asks the
     // Kubernetes API which pods exist and streams their logs through it.
-    // Everything downstream — the JSON parsing, the label set, the Loki
-    // endpoint — is identical, so what lands in Loki is the same either way.
+    // Everything downstream â€” the JSON parsing, the label set, the Loki
+    // endpoint â€” is identical, so what lands in Loki is the same either way.
     //
     // loki.source.kubernetes reads logs via the API server rather than
     // mounting /var/log/pods from the host, which keeps the DaemonSet from
@@ -22,7 +22,7 @@ data:
     discovery.relabel "argus_pods" {
       targets = discovery.kubernetes.pods.targets
 
-      // Only the argus namespace — don't ship kube-system/argocd noise.
+      // Only the argus namespace â€” don't ship kube-system/argocd noise.
       rule {
         source_labels = ["__meta_kubernetes_namespace"]
         regex         = "argus"

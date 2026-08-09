@@ -1,817 +1,377 @@
 apiVersion: v1
 data:
-  argus-fleet.json: |
-    {
-      "title": "Argus Fleet",
-      "uid": "argus-fleet",
-      "schemaVersion": 39,
-      "version": 2,
-      "editable": true,
-      "refresh": "15s",
-      "tags": ["argus"],
-      "time": { "from": "now-1h", "to": "now" },
-      "templating": {
-        "list": [
-          {
-            "name": "engine",
-            "label": "Engine",
-            "type": "query",
-            "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-            "query": "label_values(argus_status_level, engine)",
-            "refresh": 2,
-            "includeAll": true,
-            "multi": true,
-            "current": { "text": "All", "value": "$__all" }
-          },
-          {
-            "name": "provider",
-            "label": "Provider",
-            "type": "query",
-            "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-            "query": "label_values(argus_status_level, provider)",
-            "refresh": 2,
-            "includeAll": true,
-            "multi": true,
-            "current": { "text": "All", "value": "$__all" }
-          }
-        ]
-      },
-      "panels": [
-        {
-          "id": 100,
-          "type": "row",
-          "title": "Fleet Overview",
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-          "collapsed": false,
-          "panels": []
-        },
-        {
-          "id": 1,
-          "title": "Instances",
-          "type": "stat",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
-          "targets": [
-            {
-              "expr": "count(argus_status_level{engine=~\"$engine\", provider=~\"$provider\"}) or vector(0)",
-              "instant": true,
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "graphMode": "none",
-            "colorMode": "value",
-            "textMode": "value",
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "text" },
-              "unit": "short"
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 2,
-          "title": "Healthy",
-          "type": "stat",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
-          "targets": [
-            {
-              "expr": "count(argus_status_level{engine=~\"$engine\", provider=~\"$provider\"} == 0) or vector(0)",
-              "instant": true,
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "graphMode": "none",
-            "colorMode": "value",
-            "textMode": "value",
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "green" },
-              "unit": "short"
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 3,
-          "title": "Warning",
-          "type": "stat",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
-          "targets": [
-            {
-              "expr": "count(argus_status_level{engine=~\"$engine\", provider=~\"$provider\"} == 1) or vector(0)",
-              "instant": true,
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "graphMode": "none",
-            "colorMode": "value",
-            "textMode": "value",
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "yellow" },
-              "unit": "short"
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 4,
-          "title": "Critical",
-          "type": "stat",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
-          "targets": [
-            {
-              "expr": "count(argus_status_level{engine=~\"$engine\", provider=~\"$provider\"} == 2) or vector(0)",
-              "instant": true,
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "graphMode": "none",
-            "colorMode": "value",
-            "textMode": "value",
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "red" },
-              "unit": "short"
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 5,
-          "title": "Fleet Within SLO",
-          "description": "Share of instances currently classified healthy.",
-          "type": "gauge",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
-          "targets": [
-            {
-              "expr": "100 * count(argus_status_level{engine=~\"$engine\", provider=~\"$provider\"} == 0) / count(argus_status_level{engine=~\"$engine\", provider=~\"$provider\"})",
-              "instant": true,
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "showThresholdLabels": false,
-            "showThresholdMarkers": true,
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percent",
-              "min": 0,
-              "max": 100,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "red", "value": null },
-                  { "color": "yellow", "value": 60 },
-                  { "color": "green", "value": 99 }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 6,
-          "title": "Worst Latency",
-          "description": "Highest current latency across the filtered fleet.",
-          "type": "stat",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
-          "targets": [
-            {
-              "expr": "max(argus_latency_ms{engine=~\"$engine\", provider=~\"$provider\"})",
-              "instant": true,
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "graphMode": "none",
-            "colorMode": "value",
-            "textMode": "value",
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ms",
-              "decimals": 1,
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 50 },
-                  { "color": "red", "value": 150 }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 7,
-          "title": "Status Timeline",
-          "description": "Every status transition per instance. This is the panel that makes a chaos run legible: the spike, the breach, and the recovery.",
-          "type": "state-timeline",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 5 },
-          "targets": [
-            {
-              "expr": "argus_status_level{engine=~\"$engine\", provider=~\"$provider\"}",
-              "legendFormat": "{{instance_id}}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "mergeValues": true,
-            "showValue": "never",
-            "rowHeight": 0.9,
-            "alignValue": "center",
-            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
-            "tooltip": { "mode": "single", "sort": "none" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "thresholds" },
-              "custom": { "lineWidth": 0, "fillOpacity": 90 },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 1 },
-                  { "color": "red", "value": 2 }
-                ]
-              },
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "0": { "text": "healthy", "index": 0 },
-                    "1": { "text": "warning", "index": 1 },
-                    "2": { "text": "critical", "index": 2 }
-                  }
-                }
-              ]
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 8,
-          "title": "Fleet Detail",
-          "description": "Every instance with its current SLIs side by side. Sort by any column to find the worst offender.",
-          "type": "table",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
-          "targets": [
-            {
-              "expr": "argus_status_level{engine=~\"$engine\", provider=~\"$provider\"}",
-              "format": "table",
-              "instant": true,
-              "refId": "A"
-            },
-            {
-              "expr": "argus_latency_ms{engine=~\"$engine\", provider=~\"$provider\"}",
-              "format": "table",
-              "instant": true,
-              "refId": "B"
-            },
-            {
-              "expr": "argus_ops_sec{engine=~\"$engine\", provider=~\"$provider\"}",
-              "format": "table",
-              "instant": true,
-              "refId": "C"
-            },
-            {
-              "expr": "argus_err_rate{engine=~\"$engine\", provider=~\"$provider\"}",
-              "format": "table",
-              "instant": true,
-              "refId": "D"
-            },
-            {
-              "expr": "argus_conn_pct{engine=~\"$engine\", provider=~\"$provider\"}",
-              "format": "table",
-              "instant": true,
-              "refId": "E"
-            },
-            {
-              "expr": "argus_cache_hit_ratio{engine=~\"$engine\", provider=~\"$provider\"}",
-              "format": "table",
-              "instant": true,
-              "refId": "F"
-            },
-            {
-              "expr": "argus_storage_pct{engine=~\"$engine\", provider=~\"$provider\"}",
-              "format": "table",
-              "instant": true,
-              "refId": "G"
-            }
-          ],
-          "transformations": [
-            {
-              "id": "joinByField",
-              "options": { "byField": "instance_id", "mode": "outer" }
-            },
-            {
-              "id": "organize",
-              "options": {
-                "excludeByName": {
-                  "Time": true,
-                  "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true,
-                  "Time 5": true, "Time 6": true, "Time 7": true,
-                  "__name__": true,
-                  "__name__ 1": true, "__name__ 2": true, "__name__ 3": true,
-                  "__name__ 4": true, "__name__ 5": true, "__name__ 6": true,
-                  "__name__ 7": true,
-                  "job": true, "job 1": true, "job 2": true, "job 3": true,
-                  "job 4": true, "job 5": true, "job 6": true, "job 7": true,
-                  "instance": true,
-                  "instance 1": true, "instance 2": true, "instance 3": true,
-                  "instance 4": true, "instance 5": true, "instance 6": true,
-                  "instance 7": true,
-                  "engine 2": true, "engine 3": true, "engine 4": true,
-                  "engine 5": true, "engine 6": true, "engine 7": true,
-                  "provider 2": true, "provider 3": true, "provider 4": true,
-                  "provider 5": true, "provider 6": true, "provider 7": true,
-                  "region 2": true, "region 3": true, "region 4": true,
-                  "region 5": true, "region 6": true, "region 7": true
-                },
-                "renameByName": {
-                  "instance_id": "Instance",
-                  "engine 1": "Engine",
-                  "provider 1": "Provider",
-                  "region 1": "Region",
-                  "Value #A": "Status",
-                  "Value #B": "Latency",
-                  "Value #C": "Ops/sec",
-                  "Value #D": "Errors",
-                  "Value #E": "Conns",
-                  "Value #F": "Cache Hit",
-                  "Value #G": "Storage"
-                },
-                "indexByName": {
-                  "instance_id": 0,
-                  "engine 1": 1,
-                  "provider 1": 2,
-                  "region 1": 3,
-                  "Value #A": 4,
-                  "Value #B": 5,
-                  "Value #C": 6,
-                  "Value #D": 7,
-                  "Value #E": 8,
-                  "Value #F": 9,
-                  "Value #G": 10
-                }
-              }
-            }
-          ],
-          "options": {
-            "showHeader": true,
-            "cellHeight": "sm",
-            "sortBy": [{ "displayName": "Status", "desc": true }],
-            "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" }
-          },
-          "fieldConfig": {
-            "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
-            "overrides": [
-              {
-                "matcher": { "id": "byName", "options": "Status" },
-                "properties": [
-                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
-                  {
-                    "id": "mappings",
-                    "value": [
-                      {
-                        "type": "value",
-                        "options": {
-                          "0": { "text": "healthy", "index": 0 },
-                          "1": { "text": "warning", "index": 1 },
-                          "2": { "text": "critical", "index": 2 }
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    "id": "thresholds",
-                    "value": {
-                      "mode": "absolute",
-                      "steps": [
-                        { "color": "green", "value": null },
-                        { "color": "yellow", "value": 1 },
-                        { "color": "red", "value": 2 }
-                      ]
-                    }
-                  },
-                  { "id": "custom.width", "value": 110 }
-                ]
-              },
-              {
-                "matcher": { "id": "byName", "options": "Latency" },
-                "properties": [
-                  { "id": "unit", "value": "ms" },
-                  { "id": "decimals", "value": 1 },
-                  { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
-                  { "id": "max", "value": 600 },
-                  {
-                    "id": "thresholds",
-                    "value": {
-                      "mode": "absolute",
-                      "steps": [
-                        { "color": "green", "value": null },
-                        { "color": "yellow", "value": 50 },
-                        { "color": "red", "value": 150 }
-                      ]
-                    }
-                  }
-                ]
-              },
-              {
-                "matcher": { "id": "byName", "options": "Ops/sec" },
-                "properties": [{ "id": "unit", "value": "ops" }, { "id": "decimals", "value": 2 }]
-              },
-              {
-                "matcher": { "id": "byName", "options": "Errors" },
-                "properties": [
-                  { "id": "unit", "value": "percentunit" },
-                  { "id": "decimals", "value": 2 },
-                  {
-                    "id": "thresholds",
-                    "value": {
-                      "mode": "absolute",
-                      "steps": [
-                        { "color": "green", "value": null },
-                        { "color": "yellow", "value": 0.01 },
-                        { "color": "red", "value": 0.03 }
-                      ]
-                    }
-                  },
-                  { "id": "custom.cellOptions", "value": { "type": "color-text" } }
-                ]
-              },
-              {
-                "matcher": { "id": "byName", "options": "Conns" },
-                "properties": [
-                  { "id": "unit", "value": "percentunit" },
-                  { "id": "decimals", "value": 3 },
-                  {
-                    "id": "thresholds",
-                    "value": {
-                      "mode": "absolute",
-                      "steps": [
-                        { "color": "green", "value": null },
-                        { "color": "yellow", "value": 0.7 },
-                        { "color": "red", "value": 0.9 }
-                      ]
-                    }
-                  },
-                  { "id": "custom.cellOptions", "value": { "type": "color-text" } }
-                ]
-              },
-              {
-                "matcher": { "id": "byName", "options": "Cache Hit" },
-                "properties": [
-                  { "id": "unit", "value": "percentunit" },
-                  { "id": "decimals", "value": 3 },
-                  { "id": "custom.cellOptions", "value": { "type": "color-text" } },
-                  {
-                    "id": "thresholds",
-                    "value": {
-                      "mode": "absolute",
-                      "steps": [
-                        { "color": "red", "value": null },
-                        { "color": "yellow", "value": 0.85 },
-                        { "color": "green", "value": 0.95 }
-                      ]
-                    }
-                  }
-                ]
-              },
-              {
-                "matcher": { "id": "byName", "options": "Storage" },
-                "properties": [
-                  { "id": "unit", "value": "percentunit" },
-                  { "id": "decimals", "value": 3 },
-                  {
-                    "id": "thresholds",
-                    "value": {
-                      "mode": "absolute",
-                      "steps": [
-                        { "color": "green", "value": null },
-                        { "color": "yellow", "value": 0.75 },
-                        { "color": "red", "value": 0.9 }
-                      ]
-                    }
-                  },
-                  { "id": "custom.cellOptions", "value": { "type": "color-text" } }
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "id": 200,
-          "type": "row",
-          "title": "Golden Signals",
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
-          "collapsed": false,
-          "panels": []
-        },
-        {
-          "id": 9,
-          "title": "Latency",
-          "description": "Round-trip time of the engine's own health probe.",
-          "type": "timeseries",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
-          "targets": [
-            {
-              "expr": "argus_latency_ms{engine=~\"$engine\", provider=~\"$provider\"}",
-              "legendFormat": "{{instance_id}}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ms",
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 2,
-                "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": true
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 10,
-          "title": "Throughput",
-          "description": "Operations per second, derived from each engine's cumulative counters.",
-          "type": "timeseries",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
-          "targets": [
-            {
-              "expr": "argus_ops_sec{engine=~\"$engine\", provider=~\"$provider\"}",
-              "legendFormat": "{{instance_id}}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ops",
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 2,
-                "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": true
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 11,
-          "title": "Error Rate",
-          "description": "Engine-appropriate error proxy: rollback ratio, aborted connects, asserts, or rejected connections.",
-          "type": "timeseries",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
-          "targets": [
-            {
-              "expr": "argus_err_rate{engine=~\"$engine\", provider=~\"$provider\"}",
-              "legendFormat": "{{instance_id}}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "min": 0,
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 2,
-                "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": true,
-                "thresholdsStyle": { "mode": "dashed" }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "transparent", "value": null },
-                  { "color": "red", "value": 0.03 }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 12,
-          "title": "Connection Saturation",
-          "description": "Active connections as a share of each engine's configured maximum.",
-          "type": "timeseries",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
-          "targets": [
-            {
-              "expr": "argus_conn_pct{engine=~\"$engine\", provider=~\"$provider\"}",
-              "legendFormat": "{{instance_id}}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "min": 0,
-              "max": 1,
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 2,
-                "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": true,
-                "thresholdsStyle": { "mode": "dashed" }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "transparent", "value": null },
-                  { "color": "red", "value": 0.9 }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 300,
-          "type": "row",
-          "title": "Capacity & Efficiency",
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
-          "collapsed": false,
-          "panels": []
-        },
-        {
-          "id": 13,
-          "title": "Cache Hit Ratio",
-          "description": "Postgres blks_hit ratio, MySQL InnoDB buffer pool, Redis keyspace hits. Lower is worse — this SLI is inverted.",
-          "type": "timeseries",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
-          "targets": [
-            {
-              "expr": "argus_cache_hit_ratio{engine=~\"$engine\", provider=~\"$provider\"}",
-              "legendFormat": "{{instance_id}}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "min"] },
-            "tooltip": { "mode": "multi", "sort": "asc" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "min": 0,
-              "max": 1,
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 2,
-                "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": true,
-                "thresholdsStyle": { "mode": "dashed" }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "red", "value": null },
-                  { "color": "transparent", "value": 0.95 }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 14,
-          "title": "Storage Used",
-          "description": "Data size against each engine's soft free-tier cap (collector/config.py).",
-          "type": "timeseries",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
-          "targets": [
-            {
-              "expr": "argus_storage_pct{engine=~\"$engine\", provider=~\"$provider\"}",
-              "legendFormat": "{{instance_id}}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["last", "max"] },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "min": 0,
-              "max": 1,
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 2,
-                "fillOpacity": 8,
-                "showPoints": "never",
-                "spanNulls": true,
-                "thresholdsStyle": { "mode": "dashed" }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "transparent", "value": null },
-                  { "color": "red", "value": 0.9 }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 15,
-          "title": "Collector Health",
-          "description": "Is the exporter itself being scraped? If this drops, no other panel on this dashboard can be trusted.",
-          "type": "timeseries",
-          "datasource": { "type": "prometheus", "uid": "argus-mimir" },
-          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 50 },
-          "targets": [
-            { "expr": "up{job=\"argus-collector\"}", "legendFormat": "collector scrape", "refId": "A" }
-          ],
-          "options": {
-            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-            "tooltip": { "mode": "single", "sort": "none" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "min": 0,
-              "max": 1,
-              "decimals": 0,
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "stepAfter",
-                "lineWidth": 2,
-                "fillOpacity": 20,
-                "showPoints": "never",
-                "spanNulls": false
-              },
-              "mappings": [
-                { "type": "value", "options": { "0": { "text": "down" }, "1": { "text": "up" } } }
-              ]
-            },
-            "overrides": []
-          }
-        }
-      ]
-    }
+  argus-fleet.json: "{\r\n  \"title\": \"Argus Fleet\",\r\n  \"uid\": \"argus-fleet\",\r\n
+    \ \"schemaVersion\": 39,\r\n  \"version\": 2,\r\n  \"editable\": true,\r\n  \"refresh\":
+    \"15s\",\r\n  \"tags\": [\"argus\"],\r\n  \"time\": { \"from\": \"now-1h\", \"to\":
+    \"now\" },\r\n  \"templating\": {\r\n    \"list\": [\r\n      {\r\n        \"name\":
+    \"engine\",\r\n        \"label\": \"Engine\",\r\n        \"type\": \"query\",\r\n
+    \       \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n
+    \       \"query\": \"label_values(argus_status_level, engine)\",\r\n        \"refresh\":
+    2,\r\n        \"includeAll\": true,\r\n        \"multi\": true,\r\n        \"current\":
+    { \"text\": \"All\", \"value\": \"$__all\" }\r\n      },\r\n      {\r\n        \"name\":
+    \"provider\",\r\n        \"label\": \"Provider\",\r\n        \"type\": \"query\",\r\n
+    \       \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n
+    \       \"query\": \"label_values(argus_status_level, provider)\",\r\n        \"refresh\":
+    2,\r\n        \"includeAll\": true,\r\n        \"multi\": true,\r\n        \"current\":
+    { \"text\": \"All\", \"value\": \"$__all\" }\r\n      }\r\n    ]\r\n  },\r\n  \"panels\":
+    [\r\n    {\r\n      \"id\": 100,\r\n      \"type\": \"row\",\r\n      \"title\":
+    \"Fleet Overview\",\r\n      \"gridPos\": { \"h\": 1, \"w\": 24, \"x\": 0, \"y\":
+    0 },\r\n      \"collapsed\": false,\r\n      \"panels\": []\r\n    },\r\n    {\r\n
+    \     \"id\": 1,\r\n      \"title\": \"Instances\",\r\n      \"type\": \"stat\",\r\n
+    \     \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n
+    \     \"gridPos\": { \"h\": 4, \"w\": 4, \"x\": 0, \"y\": 1 },\r\n      \"targets\":
+    [\r\n        {\r\n          \"expr\": \"count(argus_status_level{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"}) or vector(0)\",\r\n          \"instant\": true,\r\n
+    \         \"refId\": \"A\"\r\n        }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"graphMode\": \"none\",\r\n        \"colorMode\": \"value\",\r\n        \"textMode\":
+    \"value\",\r\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"], \"fields\":
+    \"\", \"values\": false }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"text\" },\r\n
+    \         \"unit\": \"short\"\r\n        },\r\n        \"overrides\": []\r\n      }\r\n
+    \   },\r\n    {\r\n      \"id\": 2,\r\n      \"title\": \"Healthy\",\r\n      \"type\":
+    \"stat\",\r\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\"
+    },\r\n      \"gridPos\": { \"h\": 4, \"w\": 4, \"x\": 4, \"y\": 1 },\r\n      \"targets\":
+    [\r\n        {\r\n          \"expr\": \"count(argus_status_level{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"} == 0) or vector(0)\",\r\n          \"instant\": true,\r\n
+    \         \"refId\": \"A\"\r\n        }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"graphMode\": \"none\",\r\n        \"colorMode\": \"value\",\r\n        \"textMode\":
+    \"value\",\r\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"], \"fields\":
+    \"\", \"values\": false }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"green\" },\r\n
+    \         \"unit\": \"short\"\r\n        },\r\n        \"overrides\": []\r\n      }\r\n
+    \   },\r\n    {\r\n      \"id\": 3,\r\n      \"title\": \"Warning\",\r\n      \"type\":
+    \"stat\",\r\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\"
+    },\r\n      \"gridPos\": { \"h\": 4, \"w\": 4, \"x\": 8, \"y\": 1 },\r\n      \"targets\":
+    [\r\n        {\r\n          \"expr\": \"count(argus_status_level{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"} == 1) or vector(0)\",\r\n          \"instant\": true,\r\n
+    \         \"refId\": \"A\"\r\n        }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"graphMode\": \"none\",\r\n        \"colorMode\": \"value\",\r\n        \"textMode\":
+    \"value\",\r\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"], \"fields\":
+    \"\", \"values\": false }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"yellow\" },\r\n
+    \         \"unit\": \"short\"\r\n        },\r\n        \"overrides\": []\r\n      }\r\n
+    \   },\r\n    {\r\n      \"id\": 4,\r\n      \"title\": \"Critical\",\r\n      \"type\":
+    \"stat\",\r\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\"
+    },\r\n      \"gridPos\": { \"h\": 4, \"w\": 4, \"x\": 12, \"y\": 1 },\r\n      \"targets\":
+    [\r\n        {\r\n          \"expr\": \"count(argus_status_level{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"} == 2) or vector(0)\",\r\n          \"instant\": true,\r\n
+    \         \"refId\": \"A\"\r\n        }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"graphMode\": \"none\",\r\n        \"colorMode\": \"value\",\r\n        \"textMode\":
+    \"value\",\r\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"], \"fields\":
+    \"\", \"values\": false }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"red\" },\r\n
+    \         \"unit\": \"short\"\r\n        },\r\n        \"overrides\": []\r\n      }\r\n
+    \   },\r\n    {\r\n      \"id\": 5,\r\n      \"title\": \"Fleet Within SLO\",\r\n
+    \     \"description\": \"Share of instances currently classified healthy.\",\r\n
+    \     \"type\": \"gauge\",\r\n      \"datasource\": { \"type\": \"prometheus\",
+    \"uid\": \"argus-mimir\" },\r\n      \"gridPos\": { \"h\": 4, \"w\": 4, \"x\":
+    16, \"y\": 1 },\r\n      \"targets\": [\r\n        {\r\n          \"expr\": \"100
+    * count(argus_status_level{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}
+    == 0) / count(argus_status_level{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"})\",\r\n
+    \         \"instant\": true,\r\n          \"refId\": \"A\"\r\n        }\r\n      ],\r\n
+    \     \"options\": {\r\n        \"showThresholdLabels\": false,\r\n        \"showThresholdMarkers\":
+    true,\r\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"], \"fields\":
+    \"\", \"values\": false }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"unit\": \"percent\",\r\n          \"min\": 0,\r\n          \"max\":
+    100,\r\n          \"thresholds\": {\r\n            \"mode\": \"absolute\",\r\n
+    \           \"steps\": [\r\n              { \"color\": \"red\", \"value\": null
+    },\r\n              { \"color\": \"yellow\", \"value\": 60 },\r\n              {
+    \"color\": \"green\", \"value\": 99 }\r\n            ]\r\n          }\r\n        },\r\n
+    \       \"overrides\": []\r\n      }\r\n    },\r\n    {\r\n      \"id\": 6,\r\n
+    \     \"title\": \"Worst Latency\",\r\n      \"description\": \"Highest current
+    latency across the filtered fleet.\",\r\n      \"type\": \"stat\",\r\n      \"datasource\":
+    { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n      \"gridPos\":
+    { \"h\": 4, \"w\": 4, \"x\": 20, \"y\": 1 },\r\n      \"targets\": [\r\n        {\r\n
+    \         \"expr\": \"max(argus_latency_ms{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"})\",\r\n
+    \         \"instant\": true,\r\n          \"refId\": \"A\"\r\n        }\r\n      ],\r\n
+    \     \"options\": {\r\n        \"graphMode\": \"none\",\r\n        \"colorMode\":
+    \"value\",\r\n        \"textMode\": \"value\",\r\n        \"reduceOptions\": {
+    \"calcs\": [\"lastNotNull\"], \"fields\": \"\", \"values\": false }\r\n      },\r\n
+    \     \"fieldConfig\": {\r\n        \"defaults\": {\r\n          \"unit\": \"ms\",\r\n
+    \         \"decimals\": 1,\r\n          \"color\": { \"mode\": \"thresholds\"
+    },\r\n          \"thresholds\": {\r\n            \"mode\": \"absolute\",\r\n            \"steps\":
+    [\r\n              { \"color\": \"green\", \"value\": null },\r\n              {
+    \"color\": \"yellow\", \"value\": 50 },\r\n              { \"color\": \"red\",
+    \"value\": 150 }\r\n            ]\r\n          }\r\n        },\r\n        \"overrides\":
+    []\r\n      }\r\n    },\r\n    {\r\n      \"id\": 7,\r\n      \"title\": \"Status
+    Timeline\",\r\n      \"description\": \"Every status transition per instance.
+    This is the panel that makes a chaos run legible: the spike, the breach, and the
+    recovery.\",\r\n      \"type\": \"state-timeline\",\r\n      \"datasource\": {
+    \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n      \"gridPos\": {
+    \"h\": 9, \"w\": 24, \"x\": 0, \"y\": 5 },\r\n      \"targets\": [\r\n        {\r\n
+    \         \"expr\": \"argus_status_level{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"legendFormat\": \"{{instance_id}}\",\r\n          \"refId\": \"A\"\r\n
+    \       }\r\n      ],\r\n      \"options\": {\r\n        \"mergeValues\": true,\r\n
+    \       \"showValue\": \"never\",\r\n        \"rowHeight\": 0.9,\r\n        \"alignValue\":
+    \"center\",\r\n        \"legend\": { \"displayMode\": \"list\", \"placement\":
+    \"bottom\", \"showLegend\": false },\r\n        \"tooltip\": { \"mode\": \"single\",
+    \"sort\": \"none\" }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"color\": { \"mode\": \"thresholds\" },\r\n          \"custom\":
+    { \"lineWidth\": 0, \"fillOpacity\": 90 },\r\n          \"thresholds\": {\r\n
+    \           \"mode\": \"absolute\",\r\n            \"steps\": [\r\n              {
+    \"color\": \"green\", \"value\": null },\r\n              { \"color\": \"yellow\",
+    \"value\": 1 },\r\n              { \"color\": \"red\", \"value\": 2 }\r\n            ]\r\n
+    \         },\r\n          \"mappings\": [\r\n            {\r\n              \"type\":
+    \"value\",\r\n              \"options\": {\r\n                \"0\": { \"text\":
+    \"healthy\", \"index\": 0 },\r\n                \"1\": { \"text\": \"warning\",
+    \"index\": 1 },\r\n                \"2\": { \"text\": \"critical\", \"index\":
+    2 }\r\n              }\r\n            }\r\n          ]\r\n        },\r\n        \"overrides\":
+    []\r\n      }\r\n    },\r\n    {\r\n      \"id\": 8,\r\n      \"title\": \"Fleet
+    Detail\",\r\n      \"description\": \"Every instance with its current SLIs side
+    by side. Sort by any column to find the worst offender.\",\r\n      \"type\":
+    \"table\",\r\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\"
+    },\r\n      \"gridPos\": { \"h\": 10, \"w\": 24, \"x\": 0, \"y\": 14 },\r\n      \"targets\":
+    [\r\n        {\r\n          \"expr\": \"argus_status_level{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"}\",\r\n          \"format\": \"table\",\r\n          \"instant\":
+    true,\r\n          \"refId\": \"A\"\r\n        },\r\n        {\r\n          \"expr\":
+    \"argus_latency_ms{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"format\": \"table\",\r\n          \"instant\": true,\r\n          \"refId\":
+    \"B\"\r\n        },\r\n        {\r\n          \"expr\": \"argus_ops_sec{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"}\",\r\n          \"format\": \"table\",\r\n          \"instant\":
+    true,\r\n          \"refId\": \"C\"\r\n        },\r\n        {\r\n          \"expr\":
+    \"argus_err_rate{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"format\": \"table\",\r\n          \"instant\": true,\r\n          \"refId\":
+    \"D\"\r\n        },\r\n        {\r\n          \"expr\": \"argus_conn_pct{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"}\",\r\n          \"format\": \"table\",\r\n          \"instant\":
+    true,\r\n          \"refId\": \"E\"\r\n        },\r\n        {\r\n          \"expr\":
+    \"argus_cache_hit_ratio{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"format\": \"table\",\r\n          \"instant\": true,\r\n          \"refId\":
+    \"F\"\r\n        },\r\n        {\r\n          \"expr\": \"argus_storage_pct{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"}\",\r\n          \"format\": \"table\",\r\n          \"instant\":
+    true,\r\n          \"refId\": \"G\"\r\n        }\r\n      ],\r\n      \"transformations\":
+    [\r\n        {\r\n          \"id\": \"joinByField\",\r\n          \"options\":
+    { \"byField\": \"instance_id\", \"mode\": \"outer\" }\r\n        },\r\n        {\r\n
+    \         \"id\": \"organize\",\r\n          \"options\": {\r\n            \"excludeByName\":
+    {\r\n              \"Time\": true,\r\n              \"Time 1\": true, \"Time 2\":
+    true, \"Time 3\": true, \"Time 4\": true,\r\n              \"Time 5\": true, \"Time
+    6\": true, \"Time 7\": true,\r\n              \"__name__\": true,\r\n              \"__name__
+    1\": true, \"__name__ 2\": true, \"__name__ 3\": true,\r\n              \"__name__
+    4\": true, \"__name__ 5\": true, \"__name__ 6\": true,\r\n              \"__name__
+    7\": true,\r\n              \"job\": true, \"job 1\": true, \"job 2\": true, \"job
+    3\": true,\r\n              \"job 4\": true, \"job 5\": true, \"job 6\": true,
+    \"job 7\": true,\r\n              \"instance\": true,\r\n              \"instance
+    1\": true, \"instance 2\": true, \"instance 3\": true,\r\n              \"instance
+    4\": true, \"instance 5\": true, \"instance 6\": true,\r\n              \"instance
+    7\": true,\r\n              \"engine 2\": true, \"engine 3\": true, \"engine 4\":
+    true,\r\n              \"engine 5\": true, \"engine 6\": true, \"engine 7\": true,\r\n
+    \             \"provider 2\": true, \"provider 3\": true, \"provider 4\": true,\r\n
+    \             \"provider 5\": true, \"provider 6\": true, \"provider 7\": true,\r\n
+    \             \"region 2\": true, \"region 3\": true, \"region 4\": true,\r\n
+    \             \"region 5\": true, \"region 6\": true, \"region 7\": true\r\n            },\r\n
+    \           \"renameByName\": {\r\n              \"instance_id\": \"Instance\",\r\n
+    \             \"engine 1\": \"Engine\",\r\n              \"provider 1\": \"Provider\",\r\n
+    \             \"region 1\": \"Region\",\r\n              \"Value #A\": \"Status\",\r\n
+    \             \"Value #B\": \"Latency\",\r\n              \"Value #C\": \"Ops/sec\",\r\n
+    \             \"Value #D\": \"Errors\",\r\n              \"Value #E\": \"Conns\",\r\n
+    \             \"Value #F\": \"Cache Hit\",\r\n              \"Value #G\": \"Storage\"\r\n
+    \           },\r\n            \"indexByName\": {\r\n              \"instance_id\":
+    0,\r\n              \"engine 1\": 1,\r\n              \"provider 1\": 2,\r\n              \"region
+    1\": 3,\r\n              \"Value #A\": 4,\r\n              \"Value #B\": 5,\r\n
+    \             \"Value #C\": 6,\r\n              \"Value #D\": 7,\r\n              \"Value
+    #E\": 8,\r\n              \"Value #F\": 9,\r\n              \"Value #G\": 10\r\n
+    \           }\r\n          }\r\n        }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"showHeader\": true,\r\n        \"cellHeight\": \"sm\",\r\n        \"sortBy\":
+    [{ \"displayName\": \"Status\", \"desc\": true }],\r\n        \"footer\": { \"show\":
+    false, \"reducer\": [\"sum\"], \"countRows\": false, \"fields\": \"\" }\r\n      },\r\n
+    \     \"fieldConfig\": {\r\n        \"defaults\": { \"custom\": { \"align\": \"auto\",
+    \"cellOptions\": { \"type\": \"auto\" } } },\r\n        \"overrides\": [\r\n          {\r\n
+    \           \"matcher\": { \"id\": \"byName\", \"options\": \"Status\" },\r\n
+    \           \"properties\": [\r\n              { \"id\": \"custom.cellOptions\",
+    \"value\": { \"type\": \"color-background\" } },\r\n              {\r\n                \"id\":
+    \"mappings\",\r\n                \"value\": [\r\n                  {\r\n                    \"type\":
+    \"value\",\r\n                    \"options\": {\r\n                      \"0\":
+    { \"text\": \"healthy\", \"index\": 0 },\r\n                      \"1\": { \"text\":
+    \"warning\", \"index\": 1 },\r\n                      \"2\": { \"text\": \"critical\",
+    \"index\": 2 }\r\n                    }\r\n                  }\r\n                ]\r\n
+    \             },\r\n              {\r\n                \"id\": \"thresholds\",\r\n
+    \               \"value\": {\r\n                  \"mode\": \"absolute\",\r\n
+    \                 \"steps\": [\r\n                    { \"color\": \"green\",
+    \"value\": null },\r\n                    { \"color\": \"yellow\", \"value\":
+    1 },\r\n                    { \"color\": \"red\", \"value\": 2 }\r\n                  ]\r\n
+    \               }\r\n              },\r\n              { \"id\": \"custom.width\",
+    \"value\": 110 }\r\n            ]\r\n          },\r\n          {\r\n            \"matcher\":
+    { \"id\": \"byName\", \"options\": \"Latency\" },\r\n            \"properties\":
+    [\r\n              { \"id\": \"unit\", \"value\": \"ms\" },\r\n              {
+    \"id\": \"decimals\", \"value\": 1 },\r\n              { \"id\": \"custom.cellOptions\",
+    \"value\": { \"type\": \"gauge\", \"mode\": \"gradient\" } },\r\n              {
+    \"id\": \"max\", \"value\": 600 },\r\n              {\r\n                \"id\":
+    \"thresholds\",\r\n                \"value\": {\r\n                  \"mode\":
+    \"absolute\",\r\n                  \"steps\": [\r\n                    { \"color\":
+    \"green\", \"value\": null },\r\n                    { \"color\": \"yellow\",
+    \"value\": 50 },\r\n                    { \"color\": \"red\", \"value\": 150 }\r\n
+    \                 ]\r\n                }\r\n              }\r\n            ]\r\n
+    \         },\r\n          {\r\n            \"matcher\": { \"id\": \"byName\",
+    \"options\": \"Ops/sec\" },\r\n            \"properties\": [{ \"id\": \"unit\",
+    \"value\": \"ops\" }, { \"id\": \"decimals\", \"value\": 2 }]\r\n          },\r\n
+    \         {\r\n            \"matcher\": { \"id\": \"byName\", \"options\": \"Errors\"
+    },\r\n            \"properties\": [\r\n              { \"id\": \"unit\", \"value\":
+    \"percentunit\" },\r\n              { \"id\": \"decimals\", \"value\": 2 },\r\n
+    \             {\r\n                \"id\": \"thresholds\",\r\n                \"value\":
+    {\r\n                  \"mode\": \"absolute\",\r\n                  \"steps\":
+    [\r\n                    { \"color\": \"green\", \"value\": null },\r\n                    {
+    \"color\": \"yellow\", \"value\": 0.01 },\r\n                    { \"color\":
+    \"red\", \"value\": 0.03 }\r\n                  ]\r\n                }\r\n              },\r\n
+    \             { \"id\": \"custom.cellOptions\", \"value\": { \"type\": \"color-text\"
+    } }\r\n            ]\r\n          },\r\n          {\r\n            \"matcher\":
+    { \"id\": \"byName\", \"options\": \"Conns\" },\r\n            \"properties\":
+    [\r\n              { \"id\": \"unit\", \"value\": \"percentunit\" },\r\n              {
+    \"id\": \"decimals\", \"value\": 3 },\r\n              {\r\n                \"id\":
+    \"thresholds\",\r\n                \"value\": {\r\n                  \"mode\":
+    \"absolute\",\r\n                  \"steps\": [\r\n                    { \"color\":
+    \"green\", \"value\": null },\r\n                    { \"color\": \"yellow\",
+    \"value\": 0.7 },\r\n                    { \"color\": \"red\", \"value\": 0.9
+    }\r\n                  ]\r\n                }\r\n              },\r\n              {
+    \"id\": \"custom.cellOptions\", \"value\": { \"type\": \"color-text\" } }\r\n
+    \           ]\r\n          },\r\n          {\r\n            \"matcher\": { \"id\":
+    \"byName\", \"options\": \"Cache Hit\" },\r\n            \"properties\": [\r\n
+    \             { \"id\": \"unit\", \"value\": \"percentunit\" },\r\n              {
+    \"id\": \"decimals\", \"value\": 3 },\r\n              { \"id\": \"custom.cellOptions\",
+    \"value\": { \"type\": \"color-text\" } },\r\n              {\r\n                \"id\":
+    \"thresholds\",\r\n                \"value\": {\r\n                  \"mode\":
+    \"absolute\",\r\n                  \"steps\": [\r\n                    { \"color\":
+    \"red\", \"value\": null },\r\n                    { \"color\": \"yellow\", \"value\":
+    0.85 },\r\n                    { \"color\": \"green\", \"value\": 0.95 }\r\n                  ]\r\n
+    \               }\r\n              }\r\n            ]\r\n          },\r\n          {\r\n
+    \           \"matcher\": { \"id\": \"byName\", \"options\": \"Storage\" },\r\n
+    \           \"properties\": [\r\n              { \"id\": \"unit\", \"value\":
+    \"percentunit\" },\r\n              { \"id\": \"decimals\", \"value\": 3 },\r\n
+    \             {\r\n                \"id\": \"thresholds\",\r\n                \"value\":
+    {\r\n                  \"mode\": \"absolute\",\r\n                  \"steps\":
+    [\r\n                    { \"color\": \"green\", \"value\": null },\r\n                    {
+    \"color\": \"yellow\", \"value\": 0.75 },\r\n                    { \"color\":
+    \"red\", \"value\": 0.9 }\r\n                  ]\r\n                }\r\n              },\r\n
+    \             { \"id\": \"custom.cellOptions\", \"value\": { \"type\": \"color-text\"
+    } }\r\n            ]\r\n          }\r\n        ]\r\n      }\r\n    },\r\n    {\r\n
+    \     \"id\": 200,\r\n      \"type\": \"row\",\r\n      \"title\": \"Golden Signals\",\r\n
+    \     \"gridPos\": { \"h\": 1, \"w\": 24, \"x\": 0, \"y\": 24 },\r\n      \"collapsed\":
+    false,\r\n      \"panels\": []\r\n    },\r\n    {\r\n      \"id\": 9,\r\n      \"title\":
+    \"Latency\",\r\n      \"description\": \"Round-trip time of the engine's own health
+    probe.\",\r\n      \"type\": \"timeseries\",\r\n      \"datasource\": { \"type\":
+    \"prometheus\", \"uid\": \"argus-mimir\" },\r\n      \"gridPos\": { \"h\": 8,
+    \"w\": 12, \"x\": 0, \"y\": 25 },\r\n      \"targets\": [\r\n        {\r\n          \"expr\":
+    \"argus_latency_ms{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"legendFormat\": \"{{instance_id}}\",\r\n          \"refId\": \"A\"\r\n
+    \       }\r\n      ],\r\n      \"options\": {\r\n        \"legend\": { \"displayMode\":
+    \"table\", \"placement\": \"right\", \"showLegend\": true, \"calcs\": [\"mean\",
+    \"max\"] },\r\n        \"tooltip\": { \"mode\": \"multi\", \"sort\": \"desc\"
+    }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\": {\r\n          \"unit\":
+    \"ms\",\r\n          \"custom\": {\r\n            \"drawStyle\": \"line\",\r\n
+    \           \"lineWidth\": 2,\r\n            \"fillOpacity\": 8,\r\n            \"showPoints\":
+    \"never\",\r\n            \"spanNulls\": true\r\n          }\r\n        },\r\n
+    \       \"overrides\": []\r\n      }\r\n    },\r\n    {\r\n      \"id\": 10,\r\n
+    \     \"title\": \"Throughput\",\r\n      \"description\": \"Operations per second,
+    derived from each engine's cumulative counters.\",\r\n      \"type\": \"timeseries\",\r\n
+    \     \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n
+    \     \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 12, \"y\": 25 },\r\n      \"targets\":
+    [\r\n        {\r\n          \"expr\": \"argus_ops_sec{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"}\",\r\n          \"legendFormat\": \"{{instance_id}}\",\r\n
+    \         \"refId\": \"A\"\r\n        }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"legend\": { \"displayMode\": \"table\", \"placement\": \"right\", \"showLegend\":
+    true, \"calcs\": [\"mean\", \"max\"] },\r\n        \"tooltip\": { \"mode\": \"multi\",
+    \"sort\": \"desc\" }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"unit\": \"ops\",\r\n          \"custom\": {\r\n            \"drawStyle\":
+    \"line\",\r\n            \"lineWidth\": 2,\r\n            \"fillOpacity\": 8,\r\n
+    \           \"showPoints\": \"never\",\r\n            \"spanNulls\": true\r\n
+    \         }\r\n        },\r\n        \"overrides\": []\r\n      }\r\n    },\r\n
+    \   {\r\n      \"id\": 11,\r\n      \"title\": \"Error Rate\",\r\n      \"description\":
+    \"Engine-appropriate error proxy: rollback ratio, aborted connects, asserts, or
+    rejected connections.\",\r\n      \"type\": \"timeseries\",\r\n      \"datasource\":
+    { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n      \"gridPos\":
+    { \"h\": 8, \"w\": 12, \"x\": 0, \"y\": 33 },\r\n      \"targets\": [\r\n        {\r\n
+    \         \"expr\": \"argus_err_rate{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"legendFormat\": \"{{instance_id}}\",\r\n          \"refId\": \"A\"\r\n
+    \       }\r\n      ],\r\n      \"options\": {\r\n        \"legend\": { \"displayMode\":
+    \"table\", \"placement\": \"right\", \"showLegend\": true, \"calcs\": [\"mean\",
+    \"max\"] },\r\n        \"tooltip\": { \"mode\": \"multi\", \"sort\": \"desc\"
+    }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\": {\r\n          \"unit\":
+    \"percentunit\",\r\n          \"min\": 0,\r\n          \"custom\": {\r\n            \"drawStyle\":
+    \"line\",\r\n            \"lineWidth\": 2,\r\n            \"fillOpacity\": 8,\r\n
+    \           \"showPoints\": \"never\",\r\n            \"spanNulls\": true,\r\n
+    \           \"thresholdsStyle\": { \"mode\": \"dashed\" }\r\n          },\r\n
+    \         \"thresholds\": {\r\n            \"mode\": \"absolute\",\r\n            \"steps\":
+    [\r\n              { \"color\": \"transparent\", \"value\": null },\r\n              {
+    \"color\": \"red\", \"value\": 0.03 }\r\n            ]\r\n          }\r\n        },\r\n
+    \       \"overrides\": []\r\n      }\r\n    },\r\n    {\r\n      \"id\": 12,\r\n
+    \     \"title\": \"Connection Saturation\",\r\n      \"description\": \"Active
+    connections as a share of each engine's configured maximum.\",\r\n      \"type\":
+    \"timeseries\",\r\n      \"datasource\": { \"type\": \"prometheus\", \"uid\":
+    \"argus-mimir\" },\r\n      \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 12, \"y\":
+    33 },\r\n      \"targets\": [\r\n        {\r\n          \"expr\": \"argus_conn_pct{engine=~\\\"$engine\\\",
+    provider=~\\\"$provider\\\"}\",\r\n          \"legendFormat\": \"{{instance_id}}\",\r\n
+    \         \"refId\": \"A\"\r\n        }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"legend\": { \"displayMode\": \"table\", \"placement\": \"right\", \"showLegend\":
+    true, \"calcs\": [\"mean\", \"max\"] },\r\n        \"tooltip\": { \"mode\": \"multi\",
+    \"sort\": \"desc\" }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\":
+    {\r\n          \"unit\": \"percentunit\",\r\n          \"min\": 0,\r\n          \"max\":
+    1,\r\n          \"custom\": {\r\n            \"drawStyle\": \"line\",\r\n            \"lineWidth\":
+    2,\r\n            \"fillOpacity\": 8,\r\n            \"showPoints\": \"never\",\r\n
+    \           \"spanNulls\": true,\r\n            \"thresholdsStyle\": { \"mode\":
+    \"dashed\" }\r\n          },\r\n          \"thresholds\": {\r\n            \"mode\":
+    \"absolute\",\r\n            \"steps\": [\r\n              { \"color\": \"transparent\",
+    \"value\": null },\r\n              { \"color\": \"red\", \"value\": 0.9 }\r\n
+    \           ]\r\n          }\r\n        },\r\n        \"overrides\": []\r\n      }\r\n
+    \   },\r\n    {\r\n      \"id\": 300,\r\n      \"type\": \"row\",\r\n      \"title\":
+    \"Capacity & Efficiency\",\r\n      \"gridPos\": { \"h\": 1, \"w\": 24, \"x\":
+    0, \"y\": 41 },\r\n      \"collapsed\": false,\r\n      \"panels\": []\r\n    },\r\n
+    \   {\r\n      \"id\": 13,\r\n      \"title\": \"Cache Hit Ratio\",\r\n      \"description\":
+    \"Postgres blks_hit ratio, MySQL InnoDB buffer pool, Redis keyspace hits. Lower
+    is worse â€” this SLI is inverted.\",\r\n      \"type\": \"timeseries\",\r\n      \"datasource\":
+    { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n      \"gridPos\":
+    { \"h\": 8, \"w\": 12, \"x\": 0, \"y\": 42 },\r\n      \"targets\": [\r\n        {\r\n
+    \         \"expr\": \"argus_cache_hit_ratio{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"legendFormat\": \"{{instance_id}}\",\r\n          \"refId\": \"A\"\r\n
+    \       }\r\n      ],\r\n      \"options\": {\r\n        \"legend\": { \"displayMode\":
+    \"table\", \"placement\": \"right\", \"showLegend\": true, \"calcs\": [\"mean\",
+    \"min\"] },\r\n        \"tooltip\": { \"mode\": \"multi\", \"sort\": \"asc\" }\r\n
+    \     },\r\n      \"fieldConfig\": {\r\n        \"defaults\": {\r\n          \"unit\":
+    \"percentunit\",\r\n          \"min\": 0,\r\n          \"max\": 1,\r\n          \"custom\":
+    {\r\n            \"drawStyle\": \"line\",\r\n            \"lineWidth\": 2,\r\n
+    \           \"fillOpacity\": 8,\r\n            \"showPoints\": \"never\",\r\n
+    \           \"spanNulls\": true,\r\n            \"thresholdsStyle\": { \"mode\":
+    \"dashed\" }\r\n          },\r\n          \"thresholds\": {\r\n            \"mode\":
+    \"absolute\",\r\n            \"steps\": [\r\n              { \"color\": \"red\",
+    \"value\": null },\r\n              { \"color\": \"transparent\", \"value\": 0.95
+    }\r\n            ]\r\n          }\r\n        },\r\n        \"overrides\": []\r\n
+    \     }\r\n    },\r\n    {\r\n      \"id\": 14,\r\n      \"title\": \"Storage
+    Used\",\r\n      \"description\": \"Data size against each engine's soft free-tier
+    cap (collector/config.py).\",\r\n      \"type\": \"timeseries\",\r\n      \"datasource\":
+    { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n      \"gridPos\":
+    { \"h\": 8, \"w\": 12, \"x\": 12, \"y\": 42 },\r\n      \"targets\": [\r\n        {\r\n
+    \         \"expr\": \"argus_storage_pct{engine=~\\\"$engine\\\", provider=~\\\"$provider\\\"}\",\r\n
+    \         \"legendFormat\": \"{{instance_id}}\",\r\n          \"refId\": \"A\"\r\n
+    \       }\r\n      ],\r\n      \"options\": {\r\n        \"legend\": { \"displayMode\":
+    \"table\", \"placement\": \"right\", \"showLegend\": true, \"calcs\": [\"last\",
+    \"max\"] },\r\n        \"tooltip\": { \"mode\": \"multi\", \"sort\": \"desc\"
+    }\r\n      },\r\n      \"fieldConfig\": {\r\n        \"defaults\": {\r\n          \"unit\":
+    \"percentunit\",\r\n          \"min\": 0,\r\n          \"max\": 1,\r\n          \"custom\":
+    {\r\n            \"drawStyle\": \"line\",\r\n            \"lineWidth\": 2,\r\n
+    \           \"fillOpacity\": 8,\r\n            \"showPoints\": \"never\",\r\n
+    \           \"spanNulls\": true,\r\n            \"thresholdsStyle\": { \"mode\":
+    \"dashed\" }\r\n          },\r\n          \"thresholds\": {\r\n            \"mode\":
+    \"absolute\",\r\n            \"steps\": [\r\n              { \"color\": \"transparent\",
+    \"value\": null },\r\n              { \"color\": \"red\", \"value\": 0.9 }\r\n
+    \           ]\r\n          }\r\n        },\r\n        \"overrides\": []\r\n      }\r\n
+    \   },\r\n    {\r\n      \"id\": 15,\r\n      \"title\": \"Collector Health\",\r\n
+    \     \"description\": \"Is the exporter itself being scraped? If this drops,
+    no other panel on this dashboard can be trusted.\",\r\n      \"type\": \"timeseries\",\r\n
+    \     \"datasource\": { \"type\": \"prometheus\", \"uid\": \"argus-mimir\" },\r\n
+    \     \"gridPos\": { \"h\": 6, \"w\": 24, \"x\": 0, \"y\": 50 },\r\n      \"targets\":
+    [\r\n        { \"expr\": \"up{job=\\\"argus-collector\\\"}\", \"legendFormat\":
+    \"collector scrape\", \"refId\": \"A\" }\r\n      ],\r\n      \"options\": {\r\n
+    \       \"legend\": { \"displayMode\": \"list\", \"placement\": \"bottom\", \"showLegend\":
+    true },\r\n        \"tooltip\": { \"mode\": \"single\", \"sort\": \"none\" }\r\n
+    \     },\r\n      \"fieldConfig\": {\r\n        \"defaults\": {\r\n          \"min\":
+    0,\r\n          \"max\": 1,\r\n          \"decimals\": 0,\r\n          \"custom\":
+    {\r\n            \"drawStyle\": \"line\",\r\n            \"lineInterpolation\":
+    \"stepAfter\",\r\n            \"lineWidth\": 2,\r\n            \"fillOpacity\":
+    20,\r\n            \"showPoints\": \"never\",\r\n            \"spanNulls\": false\r\n
+    \         },\r\n          \"mappings\": [\r\n            { \"type\": \"value\",
+    \"options\": { \"0\": { \"text\": \"down\" }, \"1\": { \"text\": \"up\" } } }\r\n
+    \         ]\r\n        },\r\n        \"overrides\": []\r\n      }\r\n    }\r\n
+    \ ]\r\n}\r\n"
   argus-instance.json: |
     {
-      "title": "Argus — Instance Detail",
+      "title": "Argus â€” Instance Detail",
       "uid": "argus-instance",
       "schemaVersion": 39,
       "version": 1,

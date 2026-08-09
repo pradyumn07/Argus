@@ -11,6 +11,11 @@ spec:
   template:
     metadata:
       labels: { app: collector }
+      annotations:
+        # Stamped by k8s/generate.py from the ConfigMap content. Changing
+        # config changes this, which changes the pod template, which is
+        # what actually makes Kubernetes roll the pods. Do not hand-edit.
+        argus.dev/config-hash: "1b6d360250f83e87"
     spec:
       # ── Dependency gate ──────────────────────────────────────────
       # docker-compose.yml has `depends_on: <db>: condition: service_healthy`

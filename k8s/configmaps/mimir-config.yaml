@@ -1,7 +1,7 @@
 apiVersion: v1
 data:
   mimir.yaml: |
-    # Mimir single-binary ("monolithic") mode for local/demo use — filesystem
+    # Mimir single-binary ("monolithic") mode for local/demo use â€” filesystem
     # storage, replication_factor 1. Not how you'd run Mimir at scale (that's
     # mimir-distributed + object storage + RF 3), but functionally identical
     # for a single fleet this size. See BUILD_PLAN.md for the tradeoff.

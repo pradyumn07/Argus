@@ -23,6 +23,11 @@ spec:
   template:
     metadata:
       labels: { app: loki }
+      annotations:
+        # Stamped by k8s/generate.py from the ConfigMap content. Changing
+        # config changes this, which changes the pod template, which is
+        # what actually makes Kubernetes roll the pods. Do not hand-edit.
+        argus.dev/config-hash: "19575e3829d74205"
     spec:
       securityContext:
         # The image runs as uid 10001; the PVC mounts root-owned, so hand

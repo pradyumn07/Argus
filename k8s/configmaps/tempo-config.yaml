@@ -1,7 +1,7 @@
 apiVersion: v1
 data:
   tempo.yaml: |
-    # Tempo single-binary mode — local filesystem blocks, no object storage.
+    # Tempo single-binary mode â€” local filesystem blocks, no object storage.
     # Receives OTLP directly from the collector (see collector/tracing.py for
     # why there's no OpenTelemetry Collector in front of it yet).
 
@@ -23,7 +23,7 @@ data:
 
     ingester:
       # Short blocks so traces become queryable seconds after a poll rather
-      # than minutes — matters when you're demoing a chaos run live.
+      # than minutes â€” matters when you're demoing a chaos run live.
       max_block_duration: 5m
 
     compactor:

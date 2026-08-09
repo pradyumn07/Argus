@@ -1,20 +1,20 @@
 apiVersion: v1
 data:
   fleet.yaml: |
-    # Argus fleet definition — the single place you add or remove a target.
+    # Argus fleet definition â€” the single place you add or remove a target.
     #
     # Adding a database is a few lines of YAML here plus (for local targets) a
     # service in docker-compose.yml. No Python changes, no rebuild: the file is
     # mounted into the collector, so `docker compose restart collector` picks it up.
     #
     # dsn supports ${ENV_VAR} interpolation. A target whose referenced env var is
-    # unset or empty is SKIPPED, so a partial fleet still runs — that's how the
+    # unset or empty is SKIPPED, so a partial fleet still runs â€” that's how the
     # cloud targets stay optional while the local ones always work.
     #
     # On credentials: the local targets below use fixed throwaway credentials for
     # containers that only listen on the private compose network and hold nothing
     # but generated load. They are deliberately NOT secrets and are safe to commit.
-    # Every real/hosted target uses ${ENV_VAR} and resolves from .env — those never
+    # Every real/hosted target uses ${ENV_VAR} and resolves from .env â€” those never
     # get committed.
     #
     # slo overrides: optional, per target. A container on localhost and a
@@ -28,7 +28,7 @@ data:
       provider: docker
 
     targets:
-      # ── Local fleet (Docker Hub images, always available) ───────────────
+      # â”€â”€ Local fleet (Docker Hub images, always available) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - id: pg-local
         engine: postgres
         dsn: postgresql://argus:argus@pg-local:5432/argus
@@ -53,7 +53,7 @@ data:
         dsn: redis://redis-session-local:6379
         poll_interval_s: 2
 
-      # ── Hosted fleet (free-tier cloud, optional) ────────────────────────
+      # â”€â”€ Hosted fleet (free-tier cloud, optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       # Skipped automatically when the env var is unset, so `docker compose up`
       # works on a clean checkout with no cloud accounts at all.
       - id: pg-neon

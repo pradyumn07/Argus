@@ -11,6 +11,11 @@ spec:
   template:
     metadata:
       labels: { app: grafana }
+      annotations:
+        # Stamped by k8s/generate.py from the ConfigMap content. Changing
+        # config changes this, which changes the pod template, which is
+        # what actually makes Kubernetes roll the pods. Do not hand-edit.
+        argus.dev/config-hash: "59a13e4b5b2b27e7"
     spec:
       containers:
         - name: grafana
