@@ -71,6 +71,7 @@ CM_FILE = {
 # workload manifest -> the configmaps whose content it actually reads
 CONSUMERS = {
     "collector.yaml": ["argus-fleet-config"],
+    "agent.yaml": ["argus-fleet-config"],
     "prometheus.yaml": ["argus-prometheus-config"],
     "mimir.yaml": ["argus-mimir-config"],
     "loki.yaml": ["argus-loki-config"],

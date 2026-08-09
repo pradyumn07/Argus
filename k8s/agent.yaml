@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agent-memory
+  namespace: argus
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  namespace: argus
+  labels: { app: agent }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }  # ReadWriteOnce PVC
+  selector:
+    matchLabels: { app: agent }
+  template:
+    metadata:
+      labels: { app: agent }
+      annotations:
+        # Stamped by k8s/generate.py from the ConfigMap content. Changing
+        # config changes this, which changes the pod template, which is
+        # what actually makes Kubernetes roll the pods. Do not hand-edit.
+        argus.dev/config-hash: "1b6d360250f83e87"
+    spec:
+      securityContext:
+        fsGroup: 1000   # image runs as uid 1000; needs to own the memory PVC
+      containers:
+        - name: agent
+          image: argus-agent:latest
+          imagePullPolicy: IfNotPresent  # `kind load`-ed, never pulled
+          args: ["watch"]
+          env:
+            - { name: MIMIR_URL, value: "http://mimir:9009" }
+            - { name: LOKI_URL, value: "http://loki:3100" }
+            - { name: TEMPO_URL, value: "http://tempo:3200" }
+            - { name: ARGUS_FLEET_FILE, value: "/etc/argus/fleet.yaml" }
+            - { name: ARGUS_MEMORY_DIR, value: "/var/lib/argus/memory" }
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://tempo:4318" }
+          envFrom:
+            # Carries GEMINI_API_KEY. optional:true on purpose — without it
+            # the agent runs detect-only and logs anomalies rather than
+            # crash-looping, so a missing credential degrades the service
+            # instead of taking it down. Add the key and it starts doing RCA.
+            - secretRef: { name: argus-cloud-secrets, optional: true }
+          volumeMounts:
+            - name: fleet-config
+              mountPath: /etc/argus/fleet.yaml
+              subPath: fleet.yaml
+              readOnly: true
+            - name: memory
+              mountPath: /var/lib/argus/memory
+      volumes:
+        - name: fleet-config
+          configMap: { name: argus-fleet-config }
+        - name: memory
+          persistentVolumeClaim: { claimName: agent-memory }

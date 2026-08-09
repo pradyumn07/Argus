@@ -137,6 +137,33 @@ services:
     command: ["baseline"]
     restart: unless-stopped
 
+  # ── AIOps agent (opt-in: `docker compose --profile agent up agent`) ──
+  # Profile-gated because it needs a GEMINI_API_KEY. Without one it still
+  # runs the detector and logs anomalies — RCA is what needs the key.
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    profiles: ["agent"]
+    env_file: .env
+    environment:
+      MIMIR_URL: http://mimir:9009
+      LOKI_URL: http://loki:3100
+      TEMPO_URL: http://tempo:3200
+      ARGUS_FLEET_FILE: /etc/argus/fleet.yaml
+      ARGUS_MEMORY_DIR: /var/lib/argus/memory
+      # The agent's own investigations become traces in Tempo, next to the
+      # collector polls they reason about.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+    volumes:
+      - ./deploy/fleet.yaml:/etc/argus/fleet.yaml:ro
+      - agent-memory:/var/lib/argus/memory
+    depends_on:
+      - mimir
+      - loki
+      - tempo
+    restart: unless-stopped
+
   # ── Observability stack ────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -221,6 +248,7 @@ volumes:
   loki-data:
   tempo-data:
   alloy-data:
+  agent-memory:
   pg-local-data:
   mysql-local-data:
   mongo-local-data:
