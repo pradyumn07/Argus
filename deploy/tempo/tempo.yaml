@@ -1,0 +1,36 @@
+# Tempo single-binary mode — local filesystem blocks, no object storage.
+# Receives OTLP directly from the collector (see collector/tracing.py for
+# why there's no OpenTelemetry Collector in front of it yet).
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        # 4318 is what collector/tracing.py posts to (OTLP/HTTP).
+        http:
+          endpoint: 0.0.0.0:4318
+        # gRPC isn't used today but costs nothing to accept, and it's what
+        # most other OTel SDKs default to if something else starts emitting.
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  # Short blocks so traces become queryable seconds after a poll rather
+  # than minutes — matters when you're demoing a chaos run live.
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 48h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal

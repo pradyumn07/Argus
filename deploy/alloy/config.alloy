@@ -1,0 +1,73 @@
+// Grafana Alloy — tails container stdout and ships it to Loki.
+//
+// Alloy rather than Promtail: Promtail reached end-of-life in early 2026
+// and Alloy is its supported replacement. Same job, still an agent that
+// reads container stdout — the collector itself stays completely unaware
+// that Loki exists.
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // compose service name -> `service` label (collector, grafana, pg-local, ...)
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  // container name arrives as "/argus-collector-1"; strip the leading slash
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = { job = "argus" }
+  forward_to = [loki.process.argus.receiver]
+}
+
+loki.process "argus" {
+  // The collector emits one JSON object per line (collector/logs.py).
+  // Other containers (postgres, grafana, ...) emit plain text — this stage
+  // simply extracts nothing for them, which is fine: their lines still
+  // reach Loki, just without the structured labels.
+  stage.json {
+    expressions = {
+      level       = "level",
+      instance_id = "instance_id",
+      engine      = "engine",
+      status      = "status",
+    }
+  }
+
+  // Promote only low-cardinality fields to real Loki labels. instance_id
+  // is 11 values, engine 4, status 3, level ~3 — safe. Deliberately NOT
+  // promoting trace_id or latency_ms: unbounded label values are the
+  // classic way to melt a Loki index. They stay in the log body, where
+  // LogQL can still filter on them and Grafana's derived field can still
+  // link trace_id to Tempo.
+  stage.labels {
+    values = {
+      level       = "",
+      instance_id = "",
+      engine      = "",
+      status      = "",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

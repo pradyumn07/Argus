@@ -7,6 +7,8 @@ services:
     env_file: .env
     environment:
       ARGUS_FLEET_FILE: /etc/argus/fleet.yaml
+      # Enables tracing. Unset => tracing is a no-op (see collector/tracing.py).
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
     volumes:
       # Mounted (not baked in) so adding a target is an edit + restart,
       # with no image rebuild.
@@ -157,6 +159,47 @@ services:
       - "9009:9009"
     restart: unless-stopped
 
+  loki:
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./deploy/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./deploy/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # HTTP API / TraceQL
+      - "4318:4318"   # OTLP HTTP ingest (collector posts here)
+    restart: unless-stopped
+
+  # Tails every container's stdout and ships it to Loki. Needs the Docker
+  # socket to discover containers, and root to read it.
+  alloy:
+    image: grafana/alloy:v1.5.1
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    user: root
+    volumes:
+      - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    ports:
+      - "12345:12345"
+    depends_on:
+      - loki
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana:11.3.1
     environment:
@@ -169,10 +212,15 @@ services:
       - "3000:3000"
     depends_on:
       - mimir
+      - loki
+      - tempo
     restart: unless-stopped
 
 volumes:
   mimir-data:
+  loki-data:
+  tempo-data:
+  alloy-data:
   pg-local-data:
   mysql-local-data:
   mongo-local-data:

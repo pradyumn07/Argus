@@ -1,8 +1,13 @@
 apiVersion: 1
 
+# Explicit uids so committed dashboard JSON and the cross-datasource
+# correlation links below can reference each other by stable values
+# instead of Grafana-generated ones.
+#
+# Note on `$$`: Grafana expands $VAR in provisioning files as an env var,
+# so a literal dollar sign in a Grafana expression must be escaped as $$.
+
 datasources:
-  # Explicit uid so committed dashboard JSON can reference it by a stable
-  # value instead of a Grafana-generated one.
   - name: Mimir
     uid: argus-mimir
     type: prometheus
@@ -12,3 +17,44 @@ datasources:
     jsonData:
       httpMethod: POST
       timeInterval: 15s
+
+  - name: Loki
+    uid: argus-loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # The metrics -> logs -> traces pivot. Every collector log line
+      # carries trace_id (collector/logs.py pulls it from the active span);
+      # this turns that field into a clickable link straight into Tempo.
+      derivedFields:
+        - name: TraceID
+          matcherType: regex
+          matcherRegex: '"trace_id":\s*"([a-f0-9]{32})"'
+          url: '$${__value.raw}'
+          datasourceUid: argus-tempo
+
+  - name: Tempo
+    uid: argus-tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # ...and the reverse pivot: from a span, jump to the logs emitted
+      # during it, filtered to that exact trace.
+      tracesToLogsV2:
+        datasourceUid: argus-loki
+        spanStartTimeShift: '-2m'
+        spanEndTimeShift: '2m'
+        filterByTraceID: true
+        tags:
+          - key: 'argus.instance_id'
+            value: 'instance_id'
+      # And from a span to the metric series for the same instance.
+      tracesToMetrics:
+        datasourceUid: argus-mimir
+        spanStartTimeShift: '-2m'
+        spanEndTimeShift: '2m'
+        queries:
+          - name: 'Latency for this instance'
+            query: 'argus_latency_ms{instance_id="$$__span.tags[''argus.instance_id'']"}'
