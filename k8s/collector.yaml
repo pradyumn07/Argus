@@ -52,6 +52,8 @@ spec:
             - containerPort: 9100
           env:
             - { name: ARGUS_FLEET_FILE, value: "/etc/argus/fleet.yaml" }
+            # Enables tracing; unset would make it a no-op (collector/tracing.py).
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://tempo:4318" }
           envFrom:
             # Mirrors docker-compose's `env_file: .env` — dumps NEON_DSN,
             # SUPA_DSN, MONGO_URI, REDIS_CACHE_URL, REDIS_SESSION_URL into

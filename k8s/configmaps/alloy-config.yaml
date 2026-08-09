@@ -1,0 +1,93 @@
+apiVersion: v1
+data:
+  config.alloy: |
+    // Grafana Alloy — Kubernetes variant.
+    //
+    // This is a SEPARATE file from config.alloy (the docker-compose one) on
+    // purpose, and it's the one real deviation in the Phase 3 k8s translation:
+    // log discovery is genuinely different between the two runtimes. Compose
+    // discovers containers over the Docker socket; here Alloy asks the
+    // Kubernetes API which pods exist and streams their logs through it.
+    // Everything downstream — the JSON parsing, the label set, the Loki
+    // endpoint — is identical, so what lands in Loki is the same either way.
+    //
+    // loki.source.kubernetes reads logs via the API server rather than
+    // mounting /var/log/pods from the host, which keeps the DaemonSet from
+    // needing hostPath mounts or root.
+
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    discovery.relabel "argus_pods" {
+      targets = discovery.kubernetes.pods.targets
+
+      // Only the argus namespace — don't ship kube-system/argocd noise.
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        regex         = "argus"
+        action        = "keep"
+      }
+
+      // `service` mirrors the label the compose pipeline sets, so LogQL
+      // queries written against one runtime work against the other.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "service"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.argus_pods.output
+      forward_to = [loki.process.argus.receiver]
+    }
+
+    loki.process "argus" {
+      stage.json {
+        expressions = {
+          level       = "level",
+          instance_id = "instance_id",
+          engine      = "engine",
+          status      = "status",
+        }
+      }
+
+      // Same low-cardinality label set as the compose pipeline. trace_id and
+      // latency_ms deliberately stay in the body, not in labels.
+      stage.labels {
+        values = {
+          level       = "",
+          instance_id = "",
+          engine      = "",
+          status      = "",
+        }
+      }
+
+      stage.static_labels {
+        values = { job = "argus" }
+      }
+
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint {
+        url = "http://loki:3100/loki/api/v1/push"
+      }
+    }
+kind: ConfigMap
+metadata:
+  name: argus-alloy-config
+  namespace: argus
