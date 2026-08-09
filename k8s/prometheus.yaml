@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: argus
+  labels: { app: prometheus }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: prometheus }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: 9090 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap: { name: argus-prometheus-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: argus
+spec:
+  selector: { app: prometheus }
+  ports:
+    - port: 9090
+      targetPort: 9090

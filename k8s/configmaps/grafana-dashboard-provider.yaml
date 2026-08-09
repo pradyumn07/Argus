@@ -1,0 +1,15 @@
+apiVersion: v1
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+
+    providers:
+      - name: argus
+        folder: Argus
+        type: file
+        options:
+          path: /etc/grafana/dashboards
+kind: ConfigMap
+metadata:
+  name: argus-grafana-dashboard-provider
+  namespace: argus

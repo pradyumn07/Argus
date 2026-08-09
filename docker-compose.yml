@@ -106,6 +106,35 @@ services:
       retries: 12
     restart: unless-stopped
 
+  # ── Tools (opt-in: `docker compose --profile tools up loadgen`) ────
+  # Not part of the always-on stack — a dev/demo utility, same as running
+  # `python generate.py` on the host, just resolvable from inside the
+  # compose network instead of via HOST_PORT_MAP.
+  loadgen:
+    build:
+      context: .
+      dockerfile: loadgen/Dockerfile
+    profiles: ["tools"]
+    env_file: .env
+    environment:
+      ARGUS_FLEET_FILE: /etc/argus/fleet.yaml
+      ARGUS_IN_CLUSTER: "true"
+    volumes:
+      - ./deploy/fleet.yaml:/etc/argus/fleet.yaml:ro
+    depends_on:
+      pg-local:
+        condition: service_healthy
+      mysql-local:
+        condition: service_healthy
+      mongo-local:
+        condition: service_healthy
+      redis-cache-local:
+        condition: service_healthy
+      redis-session-local:
+        condition: service_healthy
+    command: ["baseline"]
+    restart: unless-stopped
+
   # ── Observability stack ────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.55.1

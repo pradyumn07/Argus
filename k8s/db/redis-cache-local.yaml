@@ -1,0 +1,47 @@
+# No PVC — matches docker-compose.yml, which deliberately does not persist
+# either local Redis (pure generated-load cache; losing it on restart is
+# fine and realistic).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-cache-local
+  namespace: argus
+  labels: { app: redis-cache-local }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redis-cache-local }
+  template:
+    metadata:
+      labels: { app: redis-cache-local }
+    spec:
+      containers:
+        - name: redis-cache-local
+          image: redis:7-alpine
+          # maxmemory set explicitly so storage_pct has a real denominator —
+          # see collector/pollers/redis.py and ARCHITECTURE.md §3.4.
+          args: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cache-local  # DNS name referenced verbatim in deploy/fleet.yaml's dsn
+  namespace: argus
+spec:
+  selector: { app: redis-cache-local }
+  ports:
+    - port: 6379
+      targetPort: 6379

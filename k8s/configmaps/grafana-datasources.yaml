@@ -1,0 +1,21 @@
+apiVersion: v1
+data:
+  datasources.yaml: |
+    apiVersion: 1
+
+    datasources:
+      # Explicit uid so committed dashboard JSON can reference it by a stable
+      # value instead of a Grafana-generated one.
+      - name: Mimir
+        uid: argus-mimir
+        type: prometheus
+        access: proxy
+        url: http://mimir:9009/prometheus
+        isDefault: true
+        jsonData:
+          httpMethod: POST
+          timeInterval: 15s
+kind: ConfigMap
+metadata:
+  name: argus-grafana-datasources
+  namespace: argus

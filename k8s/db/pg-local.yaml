@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-local-data
+  namespace: argus
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pg-local
+  namespace: argus
+  labels: { app: pg-local }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }  # ReadWriteOnce PVC — never run two pods at once
+  selector:
+    matchLabels: { app: pg-local }
+  template:
+    metadata:
+      labels: { app: pg-local }
+    spec:
+      containers:
+        - name: pg-local
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            # Same fixed throwaway credentials as docker-compose.yml — not
+            # secrets (private network, generated load only). See
+            # ARCHITECTURE.md §11 for the rationale carried over unchanged.
+            - { name: POSTGRES_USER, value: "argus" }
+            - { name: POSTGRES_PASSWORD, value: "argus" }
+            - { name: POSTGRES_DB, value: "argus" }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "argus", "-d", "argus"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "argus", "-d", "argus"] }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: pg-local-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-local  # DNS name referenced verbatim in deploy/fleet.yaml's dsn
+  namespace: argus
+spec:
+  selector: { app: pg-local }
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-local-data
+  namespace: argus
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-local
+  namespace: argus
+  labels: { app: mysql-local }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: mysql-local }
+  template:
+    metadata:
+      labels: { app: mysql-local }
+    spec:
+      containers:
+        - name: mysql-local
+          image: mysql:8.4
+          ports:
+            - containerPort: 3306
+          env:
+            - { name: MYSQL_ROOT_PASSWORD, value: "argus-root" }
+            - { name: MYSQL_DATABASE, value: "argus" }
+            - { name: MYSQL_USER, value: "argus" }
+            - { name: MYSQL_PASSWORD, value: "argus" }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mysql }
+          readinessProbe:
+            exec: { command: ["mysqladmin", "ping", "-h", "127.0.0.1", "-uargus", "-pargus"] }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            exec: { command: ["mysqladmin", "ping", "-h", "127.0.0.1", "-uargus", "-pargus"] }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: mysql-local-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-local  # DNS name referenced verbatim in deploy/fleet.yaml's dsn
+  namespace: argus
+spec:
+  selector: { app: mysql-local }
+  ports:
+    - port: 3306
+      targetPort: 3306

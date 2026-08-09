@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector
+  namespace: argus
+  labels: { app: collector }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: collector }
+  template:
+    metadata:
+      labels: { app: collector }
+    spec:
+      # ── Dependency gate ──────────────────────────────────────────
+      # docker-compose.yml has `depends_on: <db>: condition: service_healthy`
+      # for all 5 local DBs. Kubernetes has no native equivalent, so this is
+      # the one deliberate behavioral translation in the whole manifest set
+      # (flagged per your request, not a silent change):
+      #
+      # a TCP-connect through each DB's Service only succeeds once that
+      # Service has at least one Ready endpoint — and each DB Deployment's
+      # readinessProbe below runs the EXACT SAME health-check command
+      # docker-compose used (pg_isready / mysqladmin ping / mongosh ping /
+      # redis-cli ping). So "nc -z <service> <port> succeeds" is gated by
+      # the identical health signal compose used; it's just observed
+      # indirectly through Service endpoint routing instead of compose
+      # reading the healthcheck result directly.
+      initContainers:
+        - name: wait-for-databases
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              for target in pg-local:5432 mysql-local:3306 mongo-local:27017 \
+                            redis-cache-local:6379 redis-session-local:6379; do
+                host="${target%%:*}"
+                port="${target##*:}"
+                echo "waiting for $host:$port..."
+                until nc -z -w 2 "$host" "$port"; do
+                  sleep 2
+                done
+                echo "$host:$port is reachable"
+              done
+              echo "all database dependencies ready"
+      containers:
+        - name: collector
+          image: argus-collector:latest
+          imagePullPolicy: IfNotPresent  # image is `kind load`-ed, never pulled from a registry
+          ports:
+            - containerPort: 9100
+          env:
+            - { name: ARGUS_FLEET_FILE, value: "/etc/argus/fleet.yaml" }
+          envFrom:
+            # Mirrors docker-compose's `env_file: .env` — dumps NEON_DSN,
+            # SUPA_DSN, MONGO_URI, REDIS_CACHE_URL, REDIS_SESSION_URL into
+            # the container env, which fleet.py's ${ENV_VAR} interpolation
+            # then reads exactly as it does today.
+            # optional:true so this manifest set stays valid even before
+            # the Secret is created — an unresolved ${VAR} target is
+            # skipped by fleet.py, never a hard failure (same as today).
+            - secretRef: { name: argus-cloud-secrets, optional: true }
+          volumeMounts:
+            - name: fleet-config
+              mountPath: /etc/argus/fleet.yaml
+              subPath: fleet.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /metrics, port: 9100 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /metrics, port: 9100 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+      volumes:
+        - name: fleet-config
+          configMap: { name: argus-fleet-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: collector  # DNS name referenced verbatim in deploy/prometheus/prometheus.yml
+  namespace: argus
+spec:
+  selector: { app: collector }
+  ports:
+    - port: 9100
+      targetPort: 9100

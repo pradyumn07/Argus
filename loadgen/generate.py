@@ -356,11 +356,21 @@ async def run_chaos(fleet: dict, target: str, seconds: int):
 
 
 def main():
+    # Containerized runs (docker-compose's `loadgen` service, later a K8s
+    # Job/Deployment) set ARGUS_IN_CLUSTER=true so they resolve targets by
+    # their compose/K8s service DNS names instead of localhost:5xxxx —
+    # the host-only port mapping doesn't exist from inside the network.
+    default_in_cluster = os.environ.get("ARGUS_IN_CLUSTER", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+
     p = argparse.ArgumentParser()
     p.add_argument(
         "--in-cluster",
         action="store_true",
-        help="use compose-internal hostnames instead of published localhost ports",
+        default=default_in_cluster,
+        help="use compose-internal/K8s hostnames instead of published localhost "
+             "ports (defaults on when ARGUS_IN_CLUSTER=true is set)",
     )
     sub = p.add_subparsers(dest="mode", required=True)
     sub.add_parser("list")
