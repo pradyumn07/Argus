@@ -1,0 +1,38 @@
+# ArgoCD Application bootstrap. Deliberately lives OUTSIDE k8s/ (which is
+# the directory this Application actually syncs) — if this file were inside
+# k8s/, ArgoCD would try to reconcile its own Application resource as part
+# of the app it manages, which is the "app of apps" pattern and unnecessary
+# complexity for a single application.
+#
+# Apply once to register the app with ArgoCD:
+#   kubectl apply -f argocd/application.yaml
+# After that, every change under k8s/ on `master` is picked up automatically
+# — no further kubectl apply, ever, for anything under k8s/.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argus
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pradyumn07/Argus.git
+    targetRevision: master
+    path: k8s
+    directory:
+      # k8s/ has configmaps/ and db/ subdirectories — ArgoCD's plain-YAML
+      # Directory source does NOT recurse by default, so without this it
+      # silently only manages the 5 top-level files (namespace/collector/
+      # prometheus/mimir/grafana.yaml) and completely ignores every
+      # ConfigMap and every local DB. Found via `argocd app manifests argus`
+      # rendering far fewer resources than k8s/ actually contains.
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argus
+  syncPolicy:
+    automated:
+      prune: true     # deleting a manifest from k8s/ deletes the resource in-cluster
+      selfHeal: true   # a manual kubectl edit against the live resource gets reverted to match Git
+    syncOptions:
+      - PruneLast=true
