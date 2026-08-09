@@ -95,21 +95,42 @@ reproducible from a clean checkout.
 
 ### Logs: Loki
 
-The collector emits structured (JSON) log lines for poll results and status
-transitions to stdout. In Kubernetes, Promtail (or Grafana Alloy) tails
-container logs as a DaemonSet and ships them to Loki. The payoff: in
-Grafana, a latency spike on a metrics panel and the log line that explains
-it (e.g. `unreachable: TimeoutError`) sit side by side, correlated by
-`instance_id`.
+The collector emits one JSON object per poll on stdout (`collector/logs.py`)
+— never a file, never a direct push to Loki, because the collector shouldn't
+know Loki exists and both Docker and Kubernetes already solve "collect a
+container's stdout" better than an in-process shipper would.
+
+Grafana Alloy tails those streams and ships them to Loki (a DaemonSet in
+Kubernetes). Alloy rather than Promtail simply because Promtail is EOL.
+Log discovery is the one place the two runtimes genuinely differ — Docker
+socket vs the Kubernetes API — so there are two Alloy configs under
+`deploy/alloy/`; everything downstream (JSON parsing, label set, Loki
+endpoint) is identical.
+
+Only low-cardinality fields become Loki labels: `instance_id`, `engine`,
+`status`, `level`. `trace_id` and `latency_ms` deliberately stay in the log
+body — unbounded label values are the classic way to melt a Loki index, and
+LogQL can still filter on body content.
 
 ### Traces: Tempo
 
-OpenTelemetry spans wrap each poll, and — once the agent exists — each of
-its tool calls (Prometheus/Loki/Tempo queries during an investigation). An
-OTel Collector receives OTLP and exports to Tempo. The interesting result:
-the agent's own RCA process becomes a trace waterfall you can open in
-Grafana — literally watching the agent's reasoning steps as spans, which is
-the clearest live demo of "agentic AI" a viewer will get.
+One OpenTelemetry span per poll (`collector/tracing.py`), carrying the
+instance and the SLO verdict it produced, exported OTLP/HTTP to Tempo. Off
+entirely unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so the collector still
+runs standalone against a bare fleet.
+
+No OpenTelemetry Collector in front of Tempo — with one producer and one
+backend it's a hop that can fail without buying anything, and Tempo speaks
+OTLP natively. That calculus flips the moment the Phase 4 agent starts
+emitting spans too.
+
+**The correlation is the point.** Every log line carries the `trace_id` of
+the span active when it was emitted, which is why the log call sits *inside*
+the span in `poll_loop()`. Grafana turns that into a derived field linking
+each log line to its trace, and Tempo's `tracesToLogsV2` links each span
+back to the logs emitted during it. So: a latency spike on a Mimir panel →
+the log line explaining it in Loki → the exact span in Tempo, three clicks,
+all keyed off one poll event.
 
 ### AIOps: detector + agent
 
@@ -160,9 +181,15 @@ secret` from `.env` at deploy time and are never committed.
    two provisioned dashboards (fleet overview with status timeline, plus a
    per-instance drill-down). Chaos demo verified driving a real
    healthy → critical → healthy transition on Postgres and MySQL.
-3. **Phase 3 — logs + traces.** Structured logging from the collector +
-   Loki/Promtail; OpenTelemetry spans around polls + OTel Collector + Tempo;
-   Grafana Explore correlation across metrics/logs/traces by `instance_id`.
+3. **Phase 3 — logs + traces. Done, verified in both compose and kind.**
+   Structured JSON logging (`collector/logs.py`) shipped to Loki by Grafana
+   Alloy; one OpenTelemetry span per poll (`collector/tracing.py`) exported
+   OTLP/HTTP straight to Tempo; Loki and Tempo wired into Grafana beside
+   Mimir with bidirectional trace↔log links. Verified by resolving the same
+   `trace_id` in both Tempo and Loki for a single poll event.
+   Two deviations from the original sketch, both deliberate: Alloy instead
+   of Promtail (Promtail is EOL), and no OpenTelemetry Collector in front
+   of Tempo — see `collector/tracing.py` for when that changes.
 4. **Phase 4 — AIOps.** Anomaly detector service (PromQL + rolling z-score);
    LangGraph agent with Prometheus/Loki/Tempo tools; Alertmanager webhook
    wiring so a detected anomaly can trigger an automatic RCA run. Agent

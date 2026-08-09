@@ -9,6 +9,11 @@ hood" reference.
 Written to answer, precisely: what is running, where does each number on the
 dashboard come from, and what is real vs. configured-by-a-human.
 
+> **Scope note.** Sections 1-13 below describe the metrics pipeline and the
+> docker-compose deployment. Argus has since gained logs (Loki), traces
+> (Tempo), and a Kubernetes/ArgoCD deployment — see §14-16 at the end. Where
+> the two disagree, the later sections win.
+
 ---
 
 ## 1. System overview
@@ -704,3 +709,243 @@ BUILD_PLAN.md           phased roadmap (Phase 3: Loki+Tempo, Phase 4: AIOps,
                         Phase 5: full containerization, Phase 6: Kubernetes)
 ARCHITECTURE.md          this file
 ```
+
+---
+
+## 14. Logs and traces (Phase 3)
+
+### 14.1 The three signals, one event
+
+Every poll emits **all three** telemetry signals for the same event, joined
+by `trace_id`:
+
+| Signal | Produced by | Lands in | Queried with |
+|---|---|---|---|
+| Metric | `collector/exporter.py` (gauges) | Prometheus → Mimir | PromQL |
+| Log | `collector/logs.py` (JSON to stdout) | Alloy → Loki | LogQL |
+| Trace | `collector/tracing.py` (one span) | OTLP → Tempo | TraceQL |
+
+The join only works because the log call sits **inside** the active span in
+`poll_loop()` — `logs.py` reads `trace.get_current_span()` at format time.
+Move the log line outside the `with` block and correlation silently breaks
+while everything still appears to work. This is the single most fragile
+invariant in the codebase.
+
+### 14.2 Log format
+
+One JSON object per line on stdout:
+
+```json
+{"ts":"2026-08-09T10:28:29.500Z","level":"info","event":"poll",
+ "instance_id":"pg-neon","engine":"postgres","provider":"neon",
+ "region":"us-east","status":"warning",
+ "status_reason":"latency 542.7ms (1.4x slo)","latency_ms":542.672,
+ "unreachable":false,
+ "trace_id":"b01797989b65a93fa074df35dbb8d72f","span_id":"61df94661c4c3ba4"}
+```
+
+stdout is deliberately the only transport — never a file, never an
+in-process push to Loki. The collector shouldn't know Loki exists, and both
+Docker and Kubernetes already solve "collect a container's stdout".
+
+### 14.3 Log shipping (Alloy)
+
+Grafana Alloy, not Promtail — Promtail is EOL. Discovery is the one place
+the two runtimes genuinely differ, so there are two configs:
+
+| File | Runtime | Discovery |
+|---|---|---|
+| `deploy/alloy/config.alloy` | docker-compose | Docker socket |
+| `deploy/alloy/config-k8s.alloy` | Kubernetes | API server (`loki.source.kubernetes`) |
+
+Everything downstream — JSON parsing, label promotion, the Loki endpoint —
+is identical, so LogQL written against one runtime works on the other.
+
+**Label cardinality** is a deliberate design constraint. Promoted to Loki
+labels: `instance_id` (11 values), `engine` (4), `status` (3), `level` (~3).
+Deliberately *not* promoted: `trace_id`, `latency_ms` — unbounded label
+values are the classic way to melt a Loki index. They stay in the log body,
+where LogQL can still filter on them and Grafana's derived field can still
+link `trace_id` to Tempo.
+
+In Kubernetes, Alloy runs as a **DaemonSet** (a log shipper belongs on every
+node, even though this cluster has one) and reads pod logs through the API
+server rather than hostPath-mounting `/var/log/pods` — so it needs RBAC on
+`pods` and `pods/log`, but no host mounts and no root.
+
+### 14.4 Tracing
+
+One span per poll, named `argus.poll`, with attributes `argus.instance_id`,
+`argus.provider`, `argus.region`, `argus.status`, `argus.status_reason`,
+`argus.latency_ms`, `argus.unreachable`, `db.system`. Exported OTLP/HTTP to
+`tempo:4318` via a `BatchSpanProcessor` — batched, never simple, because a
+span export must not sit in the hot path of a loop whose entire job is
+measuring latency accurately.
+
+Tracing is **off** unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so
+`cd collector && python main.py` still works against a bare fleet with no
+stack running — the same partial-deployment philosophy as `fleet.py`
+skipping unresolvable targets.
+
+**No OpenTelemetry Collector** sits in front of Tempo. With one producer and
+one backend it's a hop that can fail without buying anything, and Tempo
+speaks OTLP natively. A Collector earns its place with fan-out to multiple
+backends, tail sampling, or shared processing — which is exactly what
+happens when the Phase 4 agent starts emitting spans too.
+
+### 14.5 Grafana correlation wiring
+
+Configured in `deploy/grafana/provisioning/datasources/datasources.yaml`
+(note: a literal `$` must be escaped as `$$`, since Grafana expands `$VAR`
+as an env var in provisioning files):
+
+- **Loki → Tempo**: a `derivedFields` entry regexes `trace_id` out of the
+  log body and renders it as a link into the `argus-tempo` datasource.
+- **Tempo → Loki**: `tracesToLogsV2` with `filterByTraceID: true`.
+- **Tempo → Mimir**: `tracesToMetrics` queries `argus_latency_ms` for the
+  span's `argus.instance_id`.
+
+So the investigation path is: latency spike on a Mimir panel → the log line
+explaining it → the exact span — three clicks, one poll event.
+
+### 14.6 Quirks worth knowing
+
+Tempo's search API returns trace IDs with **leading zeros stripped** (31
+chars), while the logs carry the full 32-char zero-padded form. Tempo's
+`/api/traces/{id}` accepts *either*, so the Grafana derived-field link
+works — but a naive string comparison between the two will not match.
+
+Also: Grafana's generic datasource proxy returns 404 for Tempo's
+`/api/traces/{id}`, and Grafana's generic
+`/api/datasources/uid/{uid}/health` returns `plugin.notImplemented` for
+Tempo. Neither indicates a problem — the Tempo plugin serves the UI through
+its own backend. Verify Tempo with `/api/search` or `/api/search/tags`
+through the proxy instead.
+
+---
+
+## 15. Kubernetes deployment (Phase 2) and GitOps
+
+Local `kind` cluster, namespace `argus`, raw YAML manifests under `k8s/`,
+reconciled by ArgoCD from `master`.
+
+### 15.1 Layout
+
+```
+k8s/
+  namespace.yaml
+  generate.py           regenerates ConfigMaps + stamps config hashes
+  create-secret.sh      cloud DSNs from .env (no values committed)
+  configmaps/           generated from deploy/ — never hand-edit
+  db/                   the 5 local DB engines (PVC + Deployment + Service)
+  collector.yaml  prometheus.yaml  mimir.yaml  loki.yaml  tempo.yaml
+  grafana.yaml    alloy.yaml
+argocd/application.yaml   bootstrap, applied once by hand
+```
+
+Service names match the hostnames already in `deploy/fleet.yaml`,
+`prometheus.yml`, and the Grafana datasources, so **none of those files
+needed changing** between compose and Kubernetes.
+
+### 15.2 Deviations forced by Kubernetes
+
+Three, all deliberate:
+
+1. **`depends_on: condition: service_healthy` has no k8s equivalent.** The
+   collector uses an `initContainer` that `nc -z`s every DB Service until it
+   answers. This is faithful rather than approximate: a Service only routes
+   to *Ready* endpoints, and each DB's `readinessProbe` runs the exact same
+   command compose's healthcheck used (`pg_isready`, `mysqladmin ping`,
+   `mongosh ping`, `redis-cli ping`).
+2. **Alloy log discovery** — see §14.3.
+3. **ConfigMap changes don't roll pods** — see §15.3.
+
+### 15.3 The config-hash annotation (a real bug, not theory)
+
+Updating a ConfigMap does **not** change a Deployment's spec, so Kubernetes
+has no reason to restart the pods — and anything that reads its config only
+at startup (Grafana provisioning, Prometheus, Loki, Tempo, Alloy) keeps
+running the old config indefinitely. ArgoCD reports `Synced` the entire
+time, because from its point of view the cluster *does* match git.
+
+This was caught live: the Loki and Tempo datasources landed in the
+ConfigMap, ArgoCD said Synced, and the running Grafana still had only Mimir
+— 18 hours after its last start.
+
+`k8s/generate.py` fixes it by stamping a SHA-256 of the config content into
+the consuming pod template as `argus.dev/config-hash`. A config change is
+then a spec change, which triggers a normal rolling update. Same mechanism
+as Helm's `checksum/config`, done by hand because these are deliberately
+raw manifests.
+
+**Workflow: after editing anything under `deploy/`, run
+`python k8s/generate.py`, then commit both the regenerated ConfigMaps and
+the updated hash annotations.**
+
+### 15.4 Secrets
+
+`k8s/create-secret.sh` filters `.env` down to the five hosted-target DSNs
+and pipes `kubectl create secret --dry-run=client -o yaml` into
+`kubectl apply -f -` (idempotent). No values are committed anywhere. The
+collector references the Secret with `optional: true`, so the manifests stay
+applyable before it exists — an unresolved `${VAR}` target is simply skipped
+by `fleet.py`.
+
+### 15.5 ArgoCD
+
+`argocd/application.yaml` lives **outside** `k8s/` on purpose — inside,
+ArgoCD would try to reconcile its own Application resource.
+
+`directory.recurse: true` is **required** and was another real bug: without
+it, ArgoCD's plain-YAML Directory source only reads top-level files and
+silently ignored `k8s/configmaps/` and `k8s/db/` entirely — 10 resources
+managed instead of 29, while still reporting `Synced`. Diagnosed with
+`argocd app manifests argus`, which rendered far fewer resources than the
+directory actually contains.
+
+`syncPolicy.automated` has `prune: true` (deleting a manifest deletes the
+resource) and `selfHeal: true` (a manual `kubectl edit` gets reverted to
+match git). Default git poll interval is ~3 minutes.
+
+### 15.6 What GitOps does *not* cover
+
+Locally-built images. `argus-collector` and `argus-loadgen` are built with
+`docker compose build` and pushed into the cluster with
+`kind load docker-image <name>:latest --name argus`. Because the tag never
+changes and `imagePullPolicy: IfNotPresent`, an updated image needs a
+rollout to take effect. A real registry with immutable tags removes this
+entirely; it's a local-kind artifact, not a design choice.
+
+---
+
+## 16. Updated verification (Kubernetes)
+
+Everything in §12 still applies; this is the Kubernetes equivalent.
+
+```bash
+kubectl port-forward -n argus svc/grafana 3000:3000 &
+
+GP=http://localhost:3000/api/datasources/proxy/uid
+
+# metrics
+curl -s --get "$GP/argus-mimir/api/v1/query" \
+  --data-urlencode 'query=count(argus_status_level)'
+
+# logs
+curl -s "$GP/argus-loki/loki/api/v1/label/instance_id/values"
+
+# traces
+curl -s --get "$GP/argus-tempo/api/search" \
+  --data-urlencode 'q={ resource.service.name = "argus-collector" }' \
+  --data-urlencode 'limit=1'
+
+# correlation: take the trace_id above, find the same event in the logs
+curl -s --get "$GP/argus-loki/loki/api/v1/query_range" \
+  --data-urlencode 'query={job="argus"} |= "<TRACE_ID>"' \
+  --data-urlencode 'limit=1'
+```
+
+Last verified in-cluster: 11 instances reporting metrics, 11 with logs, and
+trace `201ab6ab9dd5cb9138ec3d6986fc183f` resolving in Tempo *and* appearing
+in the Loki log line for `redis-session` — the same poll event visible in
+all three systems.

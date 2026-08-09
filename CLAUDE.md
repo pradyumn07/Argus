@@ -15,7 +15,26 @@ defensible in an interview — no unexplained magic numbers, no unnecessary
 paid services (must run on $0 infra except Claude API calls; Kubernetes
 means a local `kind` cluster, not a paid managed one).
 
-## Current status: Phase 2 complete and verified
+## Current status: Phases 1-3 complete, running on Kubernetes via ArgoCD
+The full Grafana stack is live: **Mimir** (metrics), **Loki** (structured
+JSON logs), **Tempo** (OTel traces), all three wired into Grafana with
+bidirectional trace↔log correlation. Deployed to a local `kind` cluster and
+reconciled by **ArgoCD** from `k8s/` on `master` — a git push is the only
+deploy step.
+
+Two things that bite in this repo, both already fixed but worth knowing:
+- **ConfigMap changes don't roll pods by themselves.** `k8s/generate.py`
+  stamps a content hash into each consuming pod template so they do. Always
+  run it after editing anything under `deploy/`; never hand-edit the
+  generated files in `k8s/configmaps/` or the hash annotations.
+- **Locally-built images** (`argus-collector`, `argus-loadgen`) need
+  `docker compose build` + `kind load docker-image ... --name argus`, then
+  a rollout — ArgoCD can't build images, and the `:latest` tag means an
+  unchanged tag won't re-pull.
+
+Next: Phase 4 (AIOps agent) per `BUILD_PLAN.md`.
+
+## Previous milestone: Phase 2 complete and verified
 The collector is a Prometheus exporter (`collector/exporter.py`), and
 `docker-compose.yml` stands up the local DB fleet + collector → Prometheus
 → Mimir → Grafana. Verified end-to-end against 11 live targets: metrics
@@ -42,10 +61,17 @@ collector/
                   targets whose secrets aren't set, builds pollers. Adding a
                   target is a YAML edit, not a code change.
   main.py         Supervisor: one independent asyncio loop per instance,
-                  jittered interval, records into the exporter.
+                  jittered interval, records into the exporter. Each poll
+                  emits all three signals — metric, log, span — correlated
+                  by trace_id (the log call sits INSIDE the span; moving it
+                  out silently breaks correlation).
   exporter.py     Prometheus gauges (argus_*) + :9100/metrics HTTP server.
                   A passive pull exporter — Prometheus scrapes on its own
                   cadence, independent of each instance's poll interval.
+  logs.py         Structured JSON to stdout, with trace_id from the active
+                  span. Alloy tails stdout -> Loki.
+  tracing.py      One OTel span per poll, OTLP/HTTP -> Tempo. No-op unless
+                  OTEL_EXPORTER_OTLP_ENDPOINT is set.
   Dockerfile      Builds the collector image (build context = repo root).
   pollers/
     base.py       Shared contract: times the round-trip, tracks previous
@@ -64,13 +90,28 @@ deploy/
   fleet.yaml                   THE fleet definition — add databases here.
   prometheus/prometheus.yml    scrape collector:9100, remote_write to Mimir.
   mimir/mimir.yaml             Mimir single-binary mode, filesystem storage.
-  grafana/provisioning/        datasource (uid argus-mimir) + dashboard
-                               provider, as code.
+  loki/loki.yaml               Loki single-binary, filesystem storage.
+  tempo/tempo.yaml             Tempo single-binary, OTLP receivers on 4317/4318.
+  alloy/config.alloy           log shipping, docker-compose (Docker socket).
+  alloy/config-k8s.alloy       log shipping, Kubernetes (API-server based).
+                               Two files because discovery genuinely differs;
+                               everything downstream is identical.
+  grafana/provisioning/        datasources (argus-mimir / argus-loki /
+                               argus-tempo, with trace<->log links) +
+                               dashboard provider, as code.
   grafana/dashboards/          argus-fleet.json (overview, status timeline,
                                all six SLIs) + argus-instance.json (per-
                                instance drill-down with $instance variable).
-docker-compose.yml   local DB fleet + collector + prometheus + mimir +
-                     grafana, one command.
+k8s/
+  generate.py                  Regenerates every ConfigMap from deploy/ AND
+                               stamps config hashes into pod templates.
+                               RUN THIS after editing deploy/.
+  create-secret.sh             Cloud DSNs from .env -> Secret. No values committed.
+  configmaps/ db/ *.yaml       Raw manifests, synced by ArgoCD.
+argocd/application.yaml        ArgoCD bootstrap (applied once, by hand).
+                               Lives outside k8s/ on purpose.
+docker-compose.yml   local DB fleet + collector + full LGTM stack + alloy,
+                     one command. `--profile tools` adds loadgen.
 .env.example      Connection strings for the OPTIONAL hosted targets only.
 requirements.txt  asyncpg, aiomysql, motor, redis, python-dotenv,
                   prometheus-client, PyYAML
@@ -123,8 +164,15 @@ anything; fix or delete them from `fleet.yaml` when convenient.
 - Independent per-instance poll intervals are deliberate (real fleets don't
   poll in lockstep) — don't refactor this into a single shared loop, even
   when adding the Prometheus exporter, tracing, or anything else on top.
-- Grafana datasources/dashboards, Prometheus/Mimir config, and (later) Helm
-  values are all provisioned as code under `deploy/` — no click-ops.
+- Grafana datasources/dashboards, Prometheus/Mimir/Loki/Tempo/Alloy config,
+  and (later) Helm values are all provisioned as code under `deploy/` — no
+  click-ops. `deploy/` is the single source; `k8s/configmaps/` is generated
+  from it, never edited directly.
+- The three signals are correlated by `trace_id`, which only works because
+  the log call happens inside the active span. Keep it that way.
+- Loki labels stay low-cardinality (`instance_id`, `engine`, `status`,
+  `level`). Never promote `trace_id`, `latency_ms`, or anything unbounded
+  to a label.
 
 ## Style preferences
 Prefer complete, ready-to-run code over partial snippets. Keep explanations
