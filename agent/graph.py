@@ -103,6 +103,17 @@ class AgentDeps:
     memory: EpisodicMemory
     model: str = config.MODEL
     trace_log: list[str] = field(default_factory=list)
+    # Optional progress sink. The CLI leaves it None; the UI passes a callback
+    # so an investigation can be streamed to the browser as it happens rather
+    # than appearing all at once when it finishes.
+    on_event: Any = None
+
+    def emit(self, kind: str, **payload: Any) -> None:
+        if self.on_event:
+            try:
+                self.on_event({"type": kind, **payload})
+            except Exception:  # a broken UI must never fail an investigation
+                pass
 
 
 NO_KEY_MESSAGE = (
@@ -167,6 +178,7 @@ def node_recall(state: State, deps: AgentDeps) -> State:
     lines = [p.headline() for p in past]
     if lines:
         log.info("recalled %d prior incident(s)", len(lines))
+    deps.emit("recall", count=len(lines), items=lines)
     return {"precedent": lines}
 
 
@@ -201,6 +213,7 @@ def node_investigate(state: State, deps: AgentDeps) -> State:
         fn_calls = response.function_calls or []
         if not fn_calls:
             log.info("investigation complete after %d tool call(s)", calls_made)
+            deps.emit("investigated", tool_calls=calls_made)
             break
 
         result_parts = []
@@ -215,6 +228,14 @@ def node_investigate(state: State, deps: AgentDeps) -> State:
             calls_made += 1
             deps.trace_log.append(f"{fc.name}({json.dumps(args, default=str)[:120]})")
             log.info("  [%d] %s -> %s", round_no + 1, fc.name, tools.preview(payload))
+            deps.emit(
+                "tool",
+                round=round_no + 1,
+                name=fc.name,
+                args=args,
+                ok="error" not in payload,
+                preview=tools.preview(payload, limit=400),
+            )
             result_parts.append(types.Part.from_function_response(name=fc.name or "", response=payload))
 
         contents.append(types.Content(role="user", parts=result_parts))
@@ -239,6 +260,7 @@ def node_draft_rca(state: State, deps: AgentDeps) -> State:
     rca = _parse_json(raw)
     if rca is None:
         return {"error": "model did not return parseable RCA JSON", "rca": {"raw": raw}}
+    deps.emit("rca", rca=rca)
     return {"rca": rca}
 
 
@@ -266,6 +288,7 @@ def node_remember(state: State, deps: AgentDeps) -> State:
     path = deps.memory.save(incident)
     if path:
         log.info("incident %s saved to %s", incident.id, path)
+    deps.emit("saved", incident_id=incident.id)
     return {"incident_id": incident.id}
 
 

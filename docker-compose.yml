@@ -164,6 +164,30 @@ services:
       - tempo
     restart: unless-stopped
 
+  # ── Live UI (opt-in: `docker compose --profile ui up ui`) ───────────
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    profiles: ["ui"]
+    env_file: .env
+    environment:
+      MIMIR_URL: http://mimir:9009
+      LOKI_URL: http://loki:3100
+      TEMPO_URL: http://tempo:3200
+      ARGUS_FLEET_FILE: /etc/argus/fleet.yaml
+      ARGUS_MEMORY_DIR: /var/lib/argus/memory
+    volumes:
+      - ./deploy/fleet.yaml:/etc/argus/fleet.yaml:ro
+      - agent-memory:/var/lib/argus/memory
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mimir
+      - loki
+      - tempo
+    restart: unless-stopped
+
   # ── Observability stack ────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.55.1

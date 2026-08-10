@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Argus — fleet</title>
+<style>
+/* ── Tokens ────────────────────────────────────────────────────────────
+   Colors come from the validated reference palette. Status colors are the
+   reserved set (good/warning/critical) and are never reused for identity;
+   the latency ramp is a single-hue sequential scale, light→dark. Each is
+   paired with a glyph + label so meaning never rests on hue alone.        */
+:root {
+  --surface:      #12120f;
+  --surface-2:    #1a1a19;
+  --surface-3:    #222220;
+  --ink:          #ffffff;
+  --ink-2:        #c3c2b7;
+  --ink-muted:    #898781;
+  --grid:         #2c2c2a;
+  --rule:         #383835;
+  --ring:         rgba(255,255,255,0.10);
+
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --critical: #d03b3b;
+  --unknown:  #33332f;
+  /* Heatmap fills. Healthy is the baseline state and is blended toward the
+     surface so it recedes; warning and critical keep their saturation so the
+     eye lands on the exceptions. Saturated fills belong on small marks and
+     accents, never on large blocks of the dominant state. */
+  --cell-good:     color-mix(in srgb, var(--good) 34%, var(--surface-2));
+  --cell-warning:  color-mix(in srgb, var(--warning) 78%, var(--surface-2));
+  --cell-critical: color-mix(in srgb, var(--critical) 88%, var(--surface-2));
+
+  /* sequential blue, 100→700 */
+  --s1:#cde2fb; --s2:#9ec5f4; --s3:#6da7ec; --s4:#3987e5;
+  --s5:#256abf; --s6:#184f95; --s7:#0d366b;
+
+  --accent: #3987e5;
+  --radius: 10px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+:root[data-theme="light"] {
+  --surface:#f9f9f7; --surface-2:#fcfcfb; --surface-3:#f0efec;
+  --ink:#0b0b0b; --ink-2:#52514e; --ink-muted:#898781;
+  --grid:#e1e0d9; --rule:#c3c2b7; --ring:rgba(11,11,11,0.10);
+  --unknown:#e6e5e0; --accent:#2a78d6;
+  --cell-good:     color-mix(in srgb, var(--good) 26%, var(--surface-2));
+  --cell-warning:  color-mix(in srgb, var(--warning) 70%, var(--surface-2));
+  --cell-critical: color-mix(in srgb, var(--critical) 82%, var(--surface-2));
+}
+
+*,*::before,*::after { box-sizing: border-box; }
+body {
+  margin:0; background:var(--surface); color:var(--ink);
+  font-family:var(--font); font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3 { margin:0; font-weight:600; letter-spacing:-0.01em; }
+.wrap { max-width:1400px; margin:0 auto; padding:22px 24px 64px; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+header {
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  padding-bottom:18px; margin-bottom:20px; border-bottom:1px solid var(--grid);
+}
+.brand { display:flex; align-items:baseline; gap:10px; }
+.brand h1 { font-size:20px; }
+.brand span { color:var(--ink-muted); font-size:12.5px; }
+.spacer { flex:1; }
+
+.pulse { position:relative; width:8px; height:8px; border-radius:50%; background:var(--good); }
+.pulse::after {
+  content:""; position:absolute; inset:0; border-radius:50%;
+  background:var(--good); animation:ping 2s cubic-bezier(0,0,.2,1) infinite;
+}
+@keyframes ping { 0%{transform:scale(1);opacity:.7} 75%,100%{transform:scale(2.8);opacity:0} }
+.live { display:flex; align-items:center; gap:8px; color:var(--ink-2); font-size:12.5px; }
+
+.health { display:flex; gap:6px; }
+.chip {
+  font-size:11px; padding:3px 8px; border-radius:999px;
+  border:1px solid var(--ring); color:var(--ink-2); background:var(--surface-2);
+  display:flex; align-items:center; gap:5px;
+}
+.chip i { width:6px; height:6px; border-radius:50%; background:var(--ink-muted); font-style:normal; }
+.chip.ok i { background:var(--good); } .chip.bad i { background:var(--critical); }
+
+button {
+  font:inherit; color:var(--ink); background:var(--surface-2);
+  border:1px solid var(--ring); border-radius:8px; padding:7px 12px;
+  cursor:pointer; transition:background .15s, border-color .15s, transform .1s;
+}
+button:hover { background:var(--surface-3); border-color:var(--rule); }
+button:active { transform:translateY(1px); }
+button.primary { background:var(--accent); border-color:transparent; color:#fff; font-weight:600; }
+button.primary:hover { filter:brightness(1.1); background:var(--accent); }
+button:disabled { opacity:.5; cursor:not-allowed; }
+.seg { display:flex; border:1px solid var(--ring); border-radius:8px; overflow:hidden; }
+.seg button { border:0; border-radius:0; padding:6px 11px; font-size:12.5px; background:transparent; }
+.seg button[aria-pressed="true"] { background:var(--surface-3); color:var(--ink); font-weight:600; }
+
+/* ── Stat tiles ─────────────────────────────────────────────────────── */
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
+.tile {
+  background:var(--surface-2); border:1px solid var(--ring);
+  border-radius:var(--radius); padding:13px 15px; position:relative; overflow:hidden;
+}
+.tile .k { font-size:11.5px; color:var(--ink-muted); text-transform:uppercase; letter-spacing:.05em;
+           display:flex; align-items:center; gap:6px; }
+.tile .v { font-size:30px; font-weight:600; margin-top:5px; letter-spacing:-0.02em; }
+.tile .sub { font-size:11.5px; color:var(--ink-muted); }
+.tile.good .v{color:var(--good)} .tile.warning .v{color:var(--warning)} .tile.critical .v{color:var(--critical)}
+.glyph { font-size:11px; }
+.tile .v.flash { animation:flash .6s ease-out; }
+@keyframes flash { 0%{ text-shadow:0 0 18px currentColor } 100%{ text-shadow:none } }
+
+/* ── Card ───────────────────────────────────────────────────────────── */
+.card {
+  background:var(--surface-2); border:1px solid var(--ring);
+  border-radius:var(--radius); padding:16px 18px; margin-bottom:18px;
+}
+.card > h2 { font-size:14px; margin-bottom:2px; }
+.card .desc { color:var(--ink-muted); font-size:12.5px; margin-bottom:14px; }
+.card-head { display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
+.card-head .desc { margin:0; }
+
+/* ── Heatmap ────────────────────────────────────────────────────────── */
+.hm { display:grid; grid-template-columns:auto 1fr; gap:0 14px; align-items:center; }
+.hm-label {
+  font-size:12px; color:var(--ink-2); text-align:right; white-space:nowrap;
+  font-variant-numeric:tabular-nums; padding:1px 0; cursor:pointer;
+  transition:color .15s;
+}
+.hm-label:hover { color:var(--ink); }
+.hm-label .eng { color:var(--ink-muted); font-size:10.5px; margin-left:5px; }
+.hm-row { display:flex; gap:2px; padding:2px 0; }   /* 2px surface gap between cells */
+.cell {
+  flex:1 1 0; height:13px; border-radius:2px; background:var(--unknown);
+  position:relative; cursor:crosshair;
+  animation:cellin .35s ease-out backwards;
+}
+@keyframes cellin { from{opacity:0; transform:scaleY(.4)} to{opacity:1; transform:scaleY(1)} }
+.cell::after {                       /* enlarged hit target, per interaction spec */
+  content:""; position:absolute; inset:-4px -1px;
+}
+.cell:hover { outline:2px solid var(--ink); outline-offset:1px; z-index:3; }
+.cell.crit { animation:cellin .35s ease-out backwards, throb 1.6s ease-in-out infinite; }
+@keyframes throb { 0%,100%{ box-shadow:0 0 0 0 rgba(208,59,59,.55) } 50%{ box-shadow:0 0 0 4px rgba(208,59,59,0) } }
+.hm-axis { display:flex; justify-content:space-between; color:var(--ink-muted);
+           font-size:11px; margin-top:7px; font-variant-numeric:tabular-nums; }
+
+.legend { display:flex; gap:14px; align-items:center; flex-wrap:wrap; font-size:12px; color:var(--ink-2); }
+.legend .item { display:flex; align-items:center; gap:6px; }
+.legend .sw { width:11px; height:11px; border-radius:2px; border:1px solid var(--ring); }
+.ramp { display:flex; gap:2px; align-items:center; }
+.ramp .sw { width:15px; height:11px; border-radius:2px; }
+
+/* ── Tooltip ────────────────────────────────────────────────────────── */
+#tip {
+  position:fixed; z-index:60; pointer-events:none; opacity:0;
+  transform:translateY(3px); transition:opacity .12s, transform .12s;
+  background:var(--surface-3); border:1px solid var(--rule); border-radius:8px;
+  padding:8px 11px; font-size:12px; box-shadow:0 8px 26px rgba(0,0,0,.5); max-width:290px;
+}
+#tip.on { opacity:1; transform:translateY(0); }
+#tip .t { font-weight:600; margin-bottom:3px; }
+#tip .r { color:var(--ink-2); display:flex; justify-content:space-between; gap:14px; }
+
+/* ── Table view (the WCAG-clean twin of the heatmap) ─────────────────── */
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+th,td { text-align:left; padding:6px 9px; border-bottom:1px solid var(--grid); }
+th { color:var(--ink-muted); font-weight:500; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; }
+td.num { text-align:right; font-variant-numeric:tabular-nums; }
+.badge { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; }
+.badge.good{color:var(--good)} .badge.warning{color:var(--warning)} .badge.critical{color:var(--critical)}
+.hidden { display:none !important; }
+
+/* ── Agent ──────────────────────────────────────────────────────────── */
+.agent-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:18px; }
+@media (max-width:960px){ .agent-grid{ grid-template-columns:1fr } }
+
+.anom { display:flex; flex-direction:column; gap:8px; max-height:290px; overflow-y:auto; }
+.anom-item {
+  border:1px solid var(--ring); border-left:3px solid var(--warning);
+  border-radius:8px; padding:9px 11px; background:var(--surface-3);
+  display:flex; gap:10px; align-items:flex-start; justify-content:space-between;
+  animation:slidein .3s ease-out backwards;
+}
+.anom-item.crit { border-left-color:var(--critical); }
+@keyframes slidein { from{opacity:0; transform:translateX(-8px)} to{opacity:1; transform:none} }
+.anom-item .m { font-size:12px; color:var(--ink-2); }
+.anom-item .who { font-weight:600; font-size:12.5px; }
+
+.stream { font-family:var(--mono); font-size:12px; max-height:420px; overflow-y:auto;
+          display:flex; flex-direction:column; gap:7px; }
+.ev { display:flex; gap:9px; align-items:flex-start; animation:slidein .28s ease-out backwards; }
+.ev .dot { width:7px; height:7px; border-radius:50%; margin-top:5px; flex:0 0 auto; background:var(--accent); }
+.ev.err .dot{ background:var(--critical) } .ev.ok .dot{ background:var(--good) }
+.ev .body { min-width:0; flex:1; }
+.ev .ttl { color:var(--ink); }
+.ev .det { color:var(--ink-muted); font-size:11px; word-break:break-word;
+           overflow-wrap:anywhere; margin-top:2px; }
+.thinking { display:flex; gap:5px; align-items:center; color:var(--ink-muted); font-size:12px; }
+.thinking b { width:5px; height:5px; border-radius:50%; background:var(--ink-muted);
+              animation:bounce 1.3s ease-in-out infinite; }
+.thinking b:nth-child(2){animation-delay:.16s} .thinking b:nth-child(3){animation-delay:.32s}
+@keyframes bounce { 0%,60%,100%{transform:translateY(0);opacity:.4} 30%{transform:translateY(-4px);opacity:1} }
+
+.rca { border:1px solid var(--ring); border-radius:var(--radius); padding:14px 16px;
+       background:var(--surface-3); animation:rise .45s cubic-bezier(.2,.8,.2,1) backwards; }
+@keyframes rise { from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:none} }
+.rca h3 { font-size:14px; margin-bottom:9px; }
+.rca .lbl { font-size:11px; color:var(--ink-muted); text-transform:uppercase;
+            letter-spacing:.05em; margin-top:12px; margin-bottom:3px; }
+.rca ul { margin:0; padding-left:17px; color:var(--ink-2); font-size:12.5px; }
+.rca li { margin-bottom:3px; }
+.conf { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--ring);
+        color:var(--ink-2); }
+.empty { color:var(--ink-muted); font-size:12.5px; padding:14px 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { animation-duration:.001ms !important; transition-duration:.001ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>Argus</h1>
+      <span id="fleetline">loading fleet…</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="health" id="health"></div>
+    <div class="live"><span class="pulse"></span><span id="tick">live</span></div>
+    <button id="theme" title="Toggle theme">◐</button>
+  </header>
+
+  <section class="tiles" id="tiles"></section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Fleet heatmap</h2>
+        <p class="desc" id="hmdesc">One row per instance, one column per minute.</p>
+      </div>
+      <div class="spacer"></div>
+      <div class="seg" role="group" aria-label="Heatmap metric">
+        <button id="m-status" aria-pressed="true">SLO status</button>
+        <button id="m-latency" aria-pressed="false">Latency</button>
+      </div>
+      <div class="seg" role="group" aria-label="Time range">
+        <button class="w" data-w="15m" aria-pressed="false">15m</button>
+        <button class="w" data-w="30m" aria-pressed="true">30m</button>
+        <button class="w" data-w="2h" aria-pressed="false">2h</button>
+      </div>
+      <button id="toggletable">Table view</button>
+    </div>
+
+    <div id="hm" class="hm"></div>
+    <div class="hm-axis"><span id="ax0"></span><span id="ax1"></span></div>
+    <div style="margin-top:13px" class="legend" id="legend"></div>
+
+    <div id="tablewrap" class="hidden" style="margin-top:16px">
+      <table>
+        <thead><tr>
+          <th>Instance</th><th>Engine</th><th>Status</th>
+          <th class="num">Latency</th><th class="num">Errors</th>
+          <th class="num">Conns</th><th class="num">Ops/s</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="agent-grid">
+    <div class="card" style="margin:0">
+      <h2>Anomaly detector</h2>
+      <p class="desc">Rolling z-score against each instance's own 30-minute baseline —
+         independent of the fixed SLO thresholds.</p>
+      <div class="anom" id="anoms"><div class="empty">scanning…</div></div>
+    </div>
+
+    <div class="card" style="margin:0">
+      <div class="card-head">
+        <div>
+          <h2>RCA agent</h2>
+          <p class="desc" id="agentdesc">Pick an instance, then watch it investigate.</p>
+        </div>
+        <div class="spacer"></div>
+        <select id="target" style="font:inherit;background:var(--surface-3);color:var(--ink);
+                border:1px solid var(--ring);border-radius:8px;padding:7px 10px"></select>
+        <button class="primary" id="go">Investigate</button>
+      </div>
+      <div class="stream" id="stream"><div class="empty">No investigation running.</div></div>
+      <div id="rca"></div>
+    </div>
+  </section>
+</div>
+
+<div id="tip"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = p => fetch(p).then(r => r.json());
+const STATUS = ['good','warning','critical'];
+const GLYPH  = {good:'●', warning:'▲', critical:'■'};   // never colour alone
+const RAMP   = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
+
+let metric = 'status', window_ = '30m', fleet = [], showTable = false, busy = false;
+
+/* ── Theme ─────────────────────────────────────────────────────────── */
+$('#theme').onclick = () => {
+  const root = document.documentElement;
+  root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  draw();
+};
+
+/* ── Tooltip ───────────────────────────────────────────────────────── */
+const tip = $('#tip');
+function showTip(e, html) {
+  tip.innerHTML = html; tip.classList.add('on');
+  const r = tip.getBoundingClientRect();
+  let x = e.clientX + 14, y = e.clientY - r.height - 10;
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
+  if (y < 8) y = e.clientY + 18;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+const hideTip = () => tip.classList.remove('on');
+
+/* ── Stat tiles ────────────────────────────────────────────────────── */
+function tiles() {
+  const n = fleet.length;
+  const c = k => fleet.filter(f => f.status === k).length;
+  const pct = n ? Math.round(c(0) / n * 100) : 0;
+  const worst = fleet.filter(f => f.latency_ms != null)
+                     .sort((a,b) => b.latency_ms - a.latency_ms)[0];
+  const t = [
+    {k:'Instances', v:n, cls:'', sub:'monitored'},
+    {k:'Healthy',  v:c(0), cls:'good',     sub:'within SLO', g:GLYPH.good},
+    {k:'Warning',  v:c(1), cls:'warning',  sub:'degraded',   g:GLYPH.warning},
+    {k:'Critical', v:c(2), cls:'critical', sub:'breaching',  g:GLYPH.critical},
+    {k:'Within SLO', v: n ? pct+'%' : '—', cls: pct>=99?'good':pct>=60?'warning':'critical', sub:'of fleet'},
+    {k:'Worst latency', v: worst ? Math.round(worst.latency_ms)+'ms' : '—', cls:'',
+     sub: worst ? worst.instance_id : ''},
+  ];
+  $('#tiles').innerHTML = t.map(x => `
+    <div class="tile ${x.cls}">
+      <div class="k">${x.g ? `<span class="glyph">${x.g}</span>` : ''}${x.k}</div>
+      <div class="v">${x.v}</div>
+      <div class="sub">${x.sub || '&nbsp;'}</div>
+    </div>`).join('');
+}
+
+/* ── Heatmap ───────────────────────────────────────────────────────── */
+let hmData = null;
+
+function cellColor(v) {
+  if (v == null) return 'var(--unknown)';
+  if (metric === 'status') return `var(--cell-${STATUS[Math.round(v)] || 'unknown'})`;
+  const max = hmData.max || 1;
+  // log scale: latency is heavy-tailed, so a linear ramp puts almost every
+  // healthy poll in the lightest bucket and hides all the useful variation.
+  const f = Math.log10(1 + Math.max(0, v)) / Math.log10(1 + max);
+  return `var(${RAMP[Math.min(RAMP.length - 1, Math.floor(f * RAMP.length))]})`;
+}
+
+function drawHeatmap() {
+  if (!hmData) return;
+  const { times, rows } = hmData;
+  $('#hm').innerHTML = rows.map((r, ri) => {
+    const cells = r.values.map((v, i) => {
+      const crit = metric === 'status' && v === 2 && i > r.values.length - 4;
+      return `<div class="cell${crit?' crit':''}" style="background:${cellColor(v)};
+               animation-delay:${Math.min(ri*22 + i*1.5, 700)}ms"
+               data-r="${ri}" data-i="${i}"></div>`;
+    }).join('');
+    return `<div class="hm-label" data-inst="${r.instance_id}">${r.instance_id}
+              <span class="eng">${r.engine||''}</span></div>
+            <div class="hm-row">${cells}</div>`;
+  }).join('');
+
+  const fmt = t => new Date(t*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  $('#ax0').textContent = times.length ? fmt(times[0]) : '';
+  $('#ax1').textContent = times.length ? fmt(times[times.length-1]) : 'now';
+
+  $('#hm').querySelectorAll('.cell').forEach(el => {
+    el.onmousemove = e => {
+      const r = rows[+el.dataset.r], v = r.values[+el.dataset.i], t = times[+el.dataset.i];
+      const val = v == null ? 'no data'
+        : metric === 'status'
+          ? `${GLYPH[STATUS[Math.round(v)]]} ${STATUS[Math.round(v)]}`
+          : v.toFixed(1) + ' ms';
+      showTip(e, `<div class="t">${r.instance_id}</div>
+                  <div class="r"><span>${new Date(t*1000).toLocaleTimeString()}</span></div>
+                  <div class="r"><span>${metric === 'status' ? 'status' : 'latency'}</span><b>${val}</b></div>`);
+    };
+    el.onmouseleave = hideTip;
+  });
+  $('#hm').querySelectorAll('.hm-label').forEach(el => {
+    el.onclick = () => { $('#target').value = el.dataset.inst; $('#go').click(); };
+  });
+  legend();
+}
+
+function legend() {
+  $('#legend').innerHTML = metric === 'status'
+    ? STATUS.map(s => `<span class="item"><span class="sw" style="background:var(--cell-${s})"></span>
+        <span class="glyph">${GLYPH[s]}</span> ${s}</span>`).join('') +
+      `<span class="item"><span class="sw" style="background:var(--unknown)"></span> no data</span>`
+    : `<span class="item">latency</span>
+       <span class="item"><span style="color:var(--ink-muted)">low</span>
+         <span class="ramp">${RAMP.map(v=>`<span class="sw" style="background:var(${v})"></span>`).join('')}</span>
+         <span style="color:var(--ink-muted)">${hmData?Math.round(hmData.max):''} ms</span></span>
+       <span class="item"><span class="sw" style="background:var(--unknown)"></span> no data</span>`;
+}
+
+function table() {
+  $('#tbody').innerHTML = fleet.map(f => {
+    const s = STATUS[f.status] || 'good';
+    const n = (v,d=2,suf='') => v == null ? '—' : v.toFixed(d)+suf;
+    return `<tr>
+      <td>${f.instance_id}</td><td>${f.engine||''}</td>
+      <td><span class="badge ${s}">${GLYPH[s]} ${s}</span></td>
+      <td class="num">${f.unreachable ? 'unreachable' : n(f.latency_ms,1,' ms')}</td>
+      <td class="num">${n(f.err_rate,3)}</td>
+      <td class="num">${n(f.conn_pct,3)}</td>
+      <td class="num">${n(f.ops_sec,1)}</td></tr>`;
+  }).join('');
+}
+
+/* ── Data ──────────────────────────────────────────────────────────── */
+async function draw() {
+  const [f, hm] = await Promise.all([
+    api('/api/fleet'),
+    api(`/api/heatmap?metric=${metric}&window=${window_}&step=${window_==='2h'?'120s':'60s'}`)
+  ]);
+  fleet = f;
+  hmData = hm;
+  hmData.max = Math.max(1, ...hm.rows.flatMap(r => r.values.filter(v => v != null)));
+  $('#fleetline').textContent =
+    `${f.length} instances · ${new Set(f.map(x=>x.engine)).size} engines`;
+  if (!$('#target').options.length) {
+    $('#target').innerHTML = f.map(x => `<option>${x.instance_id}</option>`).join('');
+  }
+  tiles(); drawHeatmap(); table();
+  $('#tick').textContent = 'live · ' + new Date().toLocaleTimeString();
+}
+
+async function anomalies() {
+  const a = await api('/api/anomalies');
+  $('#anoms').innerHTML = a.length ? a.map(x => `
+    <div class="anom-item${x.recovered ? '' : ' crit'}">
+      <div>
+        <div class="who">${x.instance_id}</div>
+        <div class="m">${x.metric.replace('argus_','')} hit <b>${(+x.peak).toPrecision(3)}</b> ·
+          ${x.infinite ? 'infinite' : x.z_score}σ · ${x.recovered ? 'recovered' : 'ongoing'}</div>
+      </div>
+      <button data-i="${x.instance_id}" data-t="${x.description.replace(/"/g,'&quot;')}"
+              data-e="${x.engine}">Investigate</button>
+    </div>`).join('')
+    : `<div class="empty">No anomalies — every instance is tracking its own baseline.</div>`;
+  $('#anoms').querySelectorAll('button').forEach(b => {
+    b.onclick = () => runAgent(b.dataset.i, b.dataset.t, b.dataset.e);
+  });
+}
+
+async function health() {
+  const h = await api('/api/health');
+  $('#health').innerHTML = ['mimir','loki','tempo'].map(k =>
+    `<span class="chip ${h[k]?'ok':'bad'}"><i></i>${k}</span>`).join('') +
+    `<span class="chip ${h.agent_key?'ok':'bad'}"><i></i>agent ${h.agent_key?'armed':'detect-only'}</span>`;
+  if (!h.agent_key) $('#agentdesc').textContent =
+    'GEMINI_API_KEY not set — detection works, RCA needs a free key.';
+}
+
+/* ── Agent stream ──────────────────────────────────────────────────── */
+function evEl(cls, title, detail) {
+  const d = document.createElement('div');
+  d.className = 'ev ' + cls;
+  d.innerHTML = `<div class="dot"></div><div class="body">
+      <div class="ttl">${title}</div>${detail?`<div class="det">${detail}</div>`:''}</div>`;
+  return d;
+}
+const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+
+function runAgent(instance, trigger, engine) {
+  if (busy) return;
+  busy = true; $('#go').disabled = true;
+  const s = $('#stream'); s.innerHTML = ''; $('#rca').innerHTML = '';
+  const push = el => { s.appendChild(el); s.scrollTop = s.scrollHeight; };
+
+  push(evEl('', `investigating <b>${esc(instance)}</b>`, esc(trigger || 'manual request')));
+  const think = document.createElement('div');
+  think.className = 'thinking';
+  think.innerHTML = '<b></b><b></b><b></b><span>querying telemetry…</span>';
+  push(think);
+
+  const q = new URLSearchParams({instance_id: instance, trigger: trigger||'', engine: engine||''});
+  const es = new EventSource('/api/investigate?' + q);
+
+  es.onmessage = m => {
+    const e = JSON.parse(m.data);
+    if (e.type === 'recall' && e.count)
+      push(evEl('', `recalled ${e.count} prior incident(s)`,
+                e.items.map(esc).join('<br>')));
+    else if (e.type === 'tool')
+      push(evEl(e.ok ? 'ok' : 'err',
+                `<b>${esc(e.name)}</b> <span style="color:var(--ink-muted)">round ${e.round}</span>`,
+                esc(JSON.stringify(e.args)) + '<br>' + esc(e.preview)));
+    else if (e.type === 'investigated')
+      push(evEl('ok', `investigation complete — ${e.tool_calls} tool call(s)`, ''));
+    else if (e.type === 'rca') { think.remove(); renderRCA(e.rca); }
+    else if (e.type === 'saved') push(evEl('ok', `saved to episodic memory`, esc(e.incident_id)));
+    else if (e.type === 'error') { think.remove(); push(evEl('err', 'failed', esc(e.message))); }
+    else if (e.type === 'done') { think.remove(); es.close(); busy = false; $('#go').disabled = false; anomalies(); }
+  };
+  es.onerror = () => { think.remove(); es.close(); busy = false; $('#go').disabled = false; };
+}
+
+function renderRCA(r) {
+  const slis = (r.breached_slis||[]).join(', ');
+  $('#rca').innerHTML = `
+    <div class="rca" style="margin-top:14px">
+      <h3>${esc(r.summary||'(no summary)')}</h3>
+      <span class="conf">${esc(r.confidence||'?')} confidence</span>
+      ${r.root_cause_determined === false ? '<span class="conf">undetermined — not saved as precedent</span>' : ''}
+      <div class="lbl">Root cause</div><div>${esc(r.root_cause||'—')}</div>
+      ${slis?`<div class="lbl">Breached</div><div>${esc(slis)}</div>`:''}
+      ${(r.evidence||[]).length?`<div class="lbl">Evidence</div>
+        <ul>${r.evidence.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`:''}
+      <div class="lbl">Recommendation</div><div>${esc(r.recommendation||'—')}</div>
+    </div>`;
+}
+
+/* ── Controls ──────────────────────────────────────────────────────── */
+$('#m-status').onclick = () => setMetric('status');
+$('#m-latency').onclick = () => setMetric('latency');
+function setMetric(m) {
+  metric = m;
+  $('#m-status').setAttribute('aria-pressed', m==='status');
+  $('#m-latency').setAttribute('aria-pressed', m==='latency');
+  $('#hmdesc').textContent = m === 'status'
+    ? 'One row per instance, one column per poll bucket. Colour is SLO state.'
+    : 'One row per instance. Colour is round-trip latency on a log scale.';
+  draw();
+}
+document.querySelectorAll('.w').forEach(b => b.onclick = () => {
+  window_ = b.dataset.w;
+  document.querySelectorAll('.w').forEach(x => x.setAttribute('aria-pressed', x===b));
+  draw();
+});
+$('#toggletable').onclick = () => {
+  showTable = !showTable;
+  $('#tablewrap').classList.toggle('hidden', !showTable);
+  $('#toggletable').textContent = showTable ? 'Hide table' : 'Table view';
+};
+$('#go').onclick = () => runAgent($('#target').value, '', '');
+
+/* ── Boot ──────────────────────────────────────────────────────────── */
+// Deep-linkable: ?metric=latency&window=2h — shareable, and it makes each
+// view reachable without clicking, which is how they get screenshot-tested.
+const qs = new URLSearchParams(location.search);
+if (qs.get('window')) {
+  window_ = qs.get('window');
+  document.querySelectorAll('.w').forEach(x =>
+    x.setAttribute('aria-pressed', x.dataset.w === window_));
+}
+setMetric(qs.get('metric') === 'latency' ? 'latency' : 'status');
+health(); anomalies();
+setInterval(draw, 10000);
+setInterval(anomalies, 30000);
+setInterval(health, 60000);
+</script>
+</body>
+</html>
