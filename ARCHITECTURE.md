@@ -11,8 +11,8 @@ dashboard come from, and what is real vs. configured-by-a-human.
 
 > **Scope note.** Sections 1-13 below describe the metrics pipeline and the
 > docker-compose deployment. Argus has since gained logs (Loki), traces
-> (Tempo), and a Kubernetes/ArgoCD deployment — see §14-16 at the end. Where
-> the two disagree, the later sections win.
+> (Tempo), a Kubernetes/ArgoCD deployment, and an AIOps agent — see §14-17
+> at the end. Where the two disagree, the later sections win.
 
 ---
 
@@ -949,3 +949,166 @@ Last verified in-cluster: 11 instances reporting metrics, 11 with logs, and
 trace `201ab6ab9dd5cb9138ec3d6986fc183f` resolving in Tempo *and* appearing
 in the Loki log line for `redis-session` — the same poll event visible in
 all three systems.
+
+---
+
+## 17. The AIOps agent (Phase 4)
+
+`agent/` closes the loop: it consumes the same three signals the rest of
+Argus produces, decides something is wrong, investigates, and writes the
+incident up.
+
+### 17.1 Cost model — $0 end to end
+
+The agent runs on **Google Gemini's free tier** (`GEMINI_API_KEY`, from
+aistudio.google.com/apikey). Argus previously claimed "$0 infra except LLM
+calls"; it is now $0 including inference. `ARGUS_AGENT_MODEL` keeps the model
+swappable, and `agent/graph.py` is the only file that touches the SDK — the
+detector, tools, memory, and graph topology are provider-agnostic.
+
+**Missing key degrades, it does not crash.** `make_client(required=False)`
+returns `None`, and `watch` runs detect-only: anomalies are still detected
+and logged, only RCA is skipped. This is why `k8s/agent.yaml` can reference
+the Secret with `optional: true` and still be safe to deploy before the key
+exists — a crash-looping pod would show as Degraded in ArgoCD forever.
+
+### 17.2 Detection (`agent/detector.py`)
+
+Rolling z-score per instance per SLI over `DETECT_WINDOW` (default 30m).
+Watched SLIs: `argus_latency_ms`, `argus_err_rate`, `argus_conn_pct`.
+`argus_ops_sec` is deliberately excluded — throughput swings with load by
+design, so a z-score on it fires on every chaos run and every quiet period
+without indicating anything is wrong.
+
+**It complements `classify.py` rather than replacing it:**
+
+| | fires when | misses |
+|---|---|---|
+| SLO breach (`classify.py`) | value crosses a fixed chosen line | degradation *within* budget |
+| z-score (`detector.py`) | value is unlike its own recent history | a target that is permanently bad |
+
+A dead cloud instance is `critical` forever but is not news — the SLO catches
+it, the detector correctly ignores it. A local Postgres drifting 2ms → 40ms
+is still inside its 50ms budget — the detector catches it, the SLO does not.
+
+**Two implementation details that are load-bearing:**
+
+- **Scores the recent tail, not the newest point.** This was a real bug found
+  in testing: a 40-second chaos spike checked one minute later has already
+  recovered, so scoring only `points[-1]` reported "no anomalies" while a
+  0.01 → 0.93 → 0.01 spike sat plainly in the data. `DETECT_RECENT_POINTS`
+  (default 6, ≈3 minutes at a 30s step) is scored against the baseline behind
+  it, and the most extreme point wins. The `Anomaly` carries `seconds_ago`
+  and `recovered` so the agent knows whether it is chasing something live.
+- **Flat-baseline guard.** A constant series has stddev 0, which makes any
+  change infinitely many deviations away. `_z()` requires the jump to also be
+  materially large in absolute terms, so `0.0 → 0.000001` on an idle metric
+  is not reported as an infinite-sigma event.
+
+`Cooldown` suppresses repeat investigations of the same instance for
+`DETECT_COOLDOWN_S` (default 15m) — otherwise a 40-second spike produces one
+investigation per detector tick for as long as it lasts.
+
+### 17.3 The graph (`agent/graph.py`)
+
+```
+recall ──▶ investigate ──▶ draft_rca ──▶ remember ──▶ END
+```
+
+| Node | Does |
+|---|---|
+| `recall` | pulls precedent from episodic memory, passed in as hypotheses to check — explicitly *not* as fact |
+| `investigate` | the tool loop: model queries backends until it stops calling tools or hits `MAX_TOOL_ROUNDS` (12) |
+| `draft_rca` | one final call, tools off, demanding a fixed JSON verdict |
+| `remember` | persists the incident — skipped on error or empty root cause, so a failed run never becomes precedent |
+
+**The tool loop is hand-written** (`automatic_function_calling=disable`)
+rather than delegated to the SDK. The reason is observability: each call is
+wrapped in an OTel span, so an investigation appears in Tempo as an
+`agent.investigation` trace with one `agent.tool.*` child per query — next to
+the collector polls it was reasoning about. Automatic function calling hides
+that loop. The bound on rounds also matters: an unbounded confused agent
+loops on queries indefinitely and burns the free-tier quota.
+
+### 17.4 Tools (`agent/tools.py`)
+
+Four tools, not forty — the model picks from descriptions, and a crowded
+surface makes that choice worse. Each description states *when* to call it,
+not just what it does.
+
+| Tool | Backend | Answers |
+|---|---|---|
+| `query_metrics` | Mimir / PromQL | what changed, when |
+| `query_logs` | Loki / LogQL | why — the collector's own `status_reason` |
+| `query_traces` | Tempo / TraceQL | the individual poll, as a span |
+| `get_slo_context` | `collector/config.py` + `fleet.yaml` | what "bad" means for *this* instance |
+
+Two design rules:
+
+- **Results are truncated before they reach the model** (`MAX_SERIES` 12,
+  `MAX_POINTS` 60, newest kept). A range query across 11 instances is
+  thousands of points; pasting all of it crowds out the reasoning it exists
+  to support.
+- **Tool errors are returned as data, never raised.** `tools.call()` catches
+  everything and returns `{"error": ...}`. A bad PromQL query is information
+  the model can act on — fix the query, try another backend — whereas an
+  exception would end the investigation.
+
+`get_slo_context` (`agent/slo.py`) is the grounding tool and the one most
+worth understanding. It imports `collector/config.py` and parses
+`deploy/fleet.yaml` directly, so the agent judges values against the *same*
+thresholds the collector classified with. Duplicating those numbers into the
+agent would guarantee eventual drift, and several hosted targets run
+deliberately widened budgets — 300ms is healthy on `mongo-orders` and an
+incident on `mongo-local`. Only `config.py` is imported (pure dataclasses);
+`collector/fleet.py` is avoided because it pulls in asyncpg/motor/redis,
+which have no business in the agent image.
+
+### 17.5 Memory (`agent/memory.py`)
+
+- **Tier 1, working** — the turns and tool results of one investigation,
+  held in LangGraph state, discarded at the end. Lets the agent build on its
+  own last query instead of restarting.
+- **Tier 2, episodic** — closed incidents as JSON under `MEMORY_DIR` (a PVC
+  in Kubernetes, a named volume in compose), recalled at the start of a later
+  investigation.
+
+Recall is **scored, not filtered**: same instance +10, same engine +4,
+overlapping breached SLI +3, small recency tiebreak. Scoring rather than
+exact-matching means a same-engine precedent still surfaces when this exact
+instance has no history — the common case early on, and precisely when
+precedent is most useful. Unrelated engines score nothing and are dropped.
+
+**Why files and not pgvector**, which the original plan sketched: recall here
+is *filtered, not fuzzy*. The question is always "what happened to this
+instance, or this engine, on this SLI, before?" — an exact-match query over a
+handful of labels. At this incident volume, filter + recency beats an
+embedding index and adds no service, no embedding model, and no extra failure
+mode. It earns a real index at thousands of incidents, where "find something
+semantically like this narrative" becomes the actual question.
+
+Memory writes degrade gracefully: an unwritable directory returns `None`
+rather than raising, and a corrupt JSON file is skipped during recall.
+
+### 17.6 Verification status
+
+Verified against the live cluster **without any API key**, since the tools,
+detector, and memory need none:
+
+- all four tools return real data from Mimir/Loki/Tempo;
+- malformed PromQL, an unknown instance, and an unknown tool all come back as
+  `{"error": ...}` instead of raising;
+- memory recall ranks instance > same-engine > unrelated correctly;
+- the detector caught a real chaos run — `conn_pct` on `pg-local` at 0.93,
+  7.3σ, correctly reported as already recovered — and reported clean at
+  baseline;
+- the LangGraph state machine runs `recall → investigate → draft_rca →
+  remember` end to end against a stubbed client, recalling precedent and
+  persisting the incident;
+- in-cluster, the agent pod runs detect-only without a key and immediately
+  flagged `argus_latency_ms` on `pg-local` at 12.2σ.
+
+**Not yet verified: the model calls themselves.** That needs a
+`GEMINI_API_KEY`. Run `python -m agent.main models` first to confirm the key
+works and see which models it can reach, then
+`python -m agent.main investigate pg-local`.

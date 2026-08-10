@@ -134,26 +134,58 @@ all keyed off one poll event.
 
 ### AIOps: detector + agent
 
-Two pieces, deliberately separate concerns:
+Two pieces, deliberately separate concerns.
 
-1. **Anomaly detector** — a small service that runs PromQL range queries on
-   a schedule and flags rolling z-score outliers per SLI. This is a cheap,
-   fully explainable complement to `classify.py`'s static SLO breach
-   (SLO breach = "this crossed a fixed line we decided on"; anomaly score =
-   "this is behaving unlike its own recent history, even if still under the
-   fixed line"). Deliberately not an LSTM/deep model — at this data volume
-   a heavier model would be unjustifiable and impossible to explain in an
-   interview.
-2. **LangGraph/Claude agent** — has tools to query Prometheus/Mimir, Loki,
-   and Tempo directly. Runs on-demand from a chat interface, and can also
-   be triggered by an Alertmanager webhook when the detector fires, to
-   produce an RCA summary automatically.
+**1. Anomaly detector** (`agent/detector.py`) — PromQL range queries on a
+loop, flagging rolling z-score outliers per SLI. This complements
+`classify.py`'s static SLO breach rather than replacing it:
 
-Open question, deferred to this phase: where the agent's long-term memory
-(past incidents, for semantic recall) lives. The original design sketched a
-Postgres + pgvector `incidents` table; that's still a reasonable choice but
-will be designed fresh when this phase starts rather than carried forward
-as speculative schema.
+| | fires when |
+|---|---|
+| `classify.py` (SLO breach) | a value crosses a fixed line we chose |
+| detector (z-score) | a value is unlike *its own* recent history |
+
+Those catch different things. A target degrading *within* budget trips the
+detector and not the SLO; a dead cloud instance is critical forever but is
+not news, so it trips the SLO and not the detector.
+
+Deliberately a z-score, not a learned model: at one sample every few seconds
+there isn't the data to justify anything heavier, and every alert must be
+explainable in a sentence — "6.2 standard deviations above its own 30-minute
+mean" is defensible in a review; a model score is not.
+
+It scores the **recent tail**, not just the newest point. That's a bug fixed
+during implementation, not a preference: a 40-second chaos spike checked a
+minute later looks perfectly healthy if you only score the last sample.
+
+**2. LangGraph agent** (`agent/graph.py`) — `recall → investigate →
+draft_rca → remember`, with four tools: PromQL (Mimir), LogQL (Loki),
+TraceQL (Tempo), and an SLO-context tool that reads `collector/config.py`
+and `fleet.yaml` directly so the agent can never judge a number against
+thresholds that drifted from the ones producing it.
+
+The tool loop is hand-written rather than the SDK's automatic function
+calling, so each call can be wrapped in an OTel span: an investigation shows
+up in Tempo as a trace next to the collector polls it reasoned about. That
+closes the loop with Phase 3 — the agent is observable by the same stack it
+observes.
+
+### Agent memory: two tiers, and why not a vector DB
+
+- **Tier 1, working memory** — the turns and tool results of one
+  investigation, held in LangGraph state. It's what lets the agent build on
+  its own last query instead of restarting.
+- **Tier 2, episodic memory** — closed incidents as JSON on a volume,
+  recalled at the start of a later investigation and ranked
+  instance > same-engine > unrelated.
+
+The original sketch called for Postgres + pgvector. Files + filtered recall
+replaced it because recall here is naturally *filtered, not fuzzy*: the
+question is always "what happened to this instance, or this engine, on this
+SLI, before?" — an exact-match query over a few labels. At this volume that
+beats an embedding index and adds no service, no embedding model, and no
+extra failure mode. Revisit at thousands of incidents, where "find something
+semantically like this narrative" starts to earn a real index.
 
 ### Containers and Kubernetes
 
@@ -190,10 +222,21 @@ secret` from `.env` at deploy time and are never committed.
    Two deviations from the original sketch, both deliberate: Alloy instead
    of Promtail (Promtail is EOL), and no OpenTelemetry Collector in front
    of Tempo — see `collector/tracing.py` for when that changes.
-4. **Phase 4 — AIOps.** Anomaly detector service (PromQL + rolling z-score);
-   LangGraph agent with Prometheus/Loki/Tempo tools; Alertmanager webhook
-   wiring so a detected anomaly can trigger an automatic RCA run. Agent
-   memory/persistence design decided here.
+4. **Phase 4 — AIOps. Done.** Anomaly detector (PromQL + rolling z-score)
+   triggering a LangGraph agent with Mimir/Loki/Tempo tools and two-tier
+   memory. Two decisions differ from the original sketch, both deliberate:
+
+   - **Gemini, not Claude.** The free tier makes Argus $0 end to end —
+     infrastructure *and* inference — which is a cleaner constraint to
+     defend than "$0 except API calls". The architecture is unchanged;
+     only the provider differs, and `ARGUS_AGENT_MODEL` keeps it swappable.
+   - **No Alertmanager.** The detector already queries Mimir on a loop and
+     calls the agent directly. Adding Alertmanager would mean routing a
+     signal we already hold out to a webhook and back — a hop that can fail
+     for nothing. It earns its place when alerts need to reach humans on
+     rotation, which is a different feature.
+
+   Agent memory is files + filtered recall, not pgvector — see below.
 5. **Phase 5 — containerize everything.** `Dockerfile` for every
    Argus-owned service; full stack (Argus services + LGTM stack) runs via
    one `docker-compose up`.

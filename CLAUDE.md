@@ -2,9 +2,10 @@
 
 ## What this is
 **Argus** — a portfolio project: a real observability stack (Prometheus,
-Mimir, Loki, Tempo, Grafana) over a heterogeneous free-tier database fleet
-(Postgres, MongoDB, Redis), with an AIOps layer — statistical anomaly
-detection plus a LangGraph/Claude agent doing root-cause analysis — on top.
+Mimir, Loki, Tempo, Grafana) over a heterogeneous database fleet (Postgres,
+MySQL, MongoDB, Redis — local containers plus free-tier cloud), with an
+AIOps layer on top: statistical anomaly detection plus a LangGraph agent
+(Gemini free tier) doing root-cause analysis.
 Fully containerized, deployed to a local Kubernetes (`kind`) cluster. Full
 rationale and phase-by-phase plan: see `BUILD_PLAN.md` (also in this repo)
 — read that before making architectural decisions.
@@ -12,10 +13,10 @@ rationale and phase-by-phase plan: see `BUILD_PLAN.md` (also in this repo)
 Built for: portfolio/interview leverage (SRE + agentic AI + full-stack),
 targeting SRE fresher interviews (Calix). Every design choice should stay
 defensible in an interview — no unexplained magic numbers, no unnecessary
-paid services (must run on $0 infra except Claude API calls; Kubernetes
-means a local `kind` cluster, not a paid managed one).
+paid services (must run on $0 infra — Kubernetes means a local `kind`
+cluster, not a paid managed one, and the agent uses a free-tier LLM API).
 
-## Current status: Phases 1-3 complete, running on Kubernetes via ArgoCD
+## Current status: Phases 1-4 complete, running on Kubernetes via ArgoCD
 The full Grafana stack is live: **Mimir** (metrics), **Loki** (structured
 JSON logs), **Tempo** (OTel traces), all three wired into Grafana with
 bidirectional trace↔log correlation. Deployed to a local `kind` cluster and
@@ -27,12 +28,22 @@ Two things that bite in this repo, both already fixed but worth knowing:
   stamps a content hash into each consuming pod template so they do. Always
   run it after editing anything under `deploy/`; never hand-edit the
   generated files in `k8s/configmaps/` or the hash annotations.
-- **Locally-built images** (`argus-collector`, `argus-loadgen`) need
+- **Locally-built images** (`argus-collector`, `argus-loadgen`, `argus-agent`) need
   `docker compose build` + `kind load docker-image ... --name argus`, then
   a rollout — ArgoCD can't build images, and the `:latest` tag means an
   unchanged tag won't re-pull.
 
-Next: Phase 4 (AIOps agent) per `BUILD_PLAN.md`.
+**Phase 4 (AIOps) is in:** `agent/` runs a rolling-z-score anomaly detector
+that triggers a LangGraph investigation (`recall -> investigate -> draft_rca
+-> remember`) with PromQL/LogQL/TraceQL tools and two-tier memory.
+
+The agent uses **Google Gemini's free tier**, not a paid API — Argus is now
+$0 end to end, inference included. Without `GEMINI_API_KEY` the agent runs
+detect-only (logs anomalies, skips RCA) rather than crash-looping, so the
+manifest is safe to deploy before the key exists.
+
+Next: Phase 5-6 polish per `BUILD_PLAN.md` — everything is already
+containerized and on Kubernetes, so those are largely done ahead of order.
 
 ## Previous milestone: Phase 2 complete and verified
 The collector is a Prometheus exporter (`collector/exporter.py`), and
@@ -81,6 +92,18 @@ collector/
     mysql.py      Reads SHOW GLOBAL STATUS / information_schema.
     mongo.py      Reads serverStatus / dbStats.
     redis.py      Reads INFO.
+agent/
+  detector.py     Rolling z-score over PromQL. Scores the recent TAIL, not
+                  just the newest point — a recovered spike is still an
+                  incident. Complements classify.py, doesn't replace it.
+  graph.py        LangGraph: recall -> investigate -> draft_rca -> remember.
+                  Hand-written tool loop so each call is an OTel span.
+  tools.py        4 tools: PromQL, LogQL, TraceQL, SLO context.
+  slo.py          Reads collector/config.py + fleet.yaml so the agent judges
+                  values against the SAME thresholds the collector uses.
+  memory.py       Tier 1 = run state; tier 2 = incidents on disk.
+  main.py         CLI: models | scan | investigate | watch | memory.
+                  `scan` proves the telemetry path with zero token spend.
 loadgen/
   generate.py     Reads the same fleet.yaml. `list` shows targets; `baseline`
                   keeps metrics moving (per-target supervision, so a dead

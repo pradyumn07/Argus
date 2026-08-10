@@ -3,8 +3,10 @@
 Polls a mixed fleet of databases (Postgres, MySQL, MongoDB, Redis), extracts
 real SLIs from each engine's native stats, classifies them against
 engine-appropriate SLOs, and feeds a real observability stack — Prometheus,
-Mimir, Grafana, and (next) Loki, Tempo, and an AIOps layer. Full architecture
-and phase plan: [`BUILD_PLAN.md`](BUILD_PLAN.md).
+Mimir, Loki, Tempo, and Grafana — with an AIOps agent on top that detects
+anomalies and writes the root-cause analysis itself. Runs on Kubernetes via
+ArgoCD, and costs nothing to operate. Full architecture and phase plan:
+[`BUILD_PLAN.md`](BUILD_PLAN.md); deep reference: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 The fleet is **hybrid**: local containers from official Docker Hub images
 (always available, reproducible) plus optional free-tier cloud instances.
@@ -24,9 +26,15 @@ deploy/
   prometheus/       scrape + remote_write config
   mimir/            single-binary Mimir (long-term metrics storage)
   grafana/          provisioned datasource + dashboards (as code)
+agent/
+  detector.py       rolling z-score anomaly detection over PromQL
+  graph.py          LangGraph: recall -> investigate -> draft_rca -> remember
+  tools.py          PromQL / LogQL / TraceQL / SLO-context tools
+  memory.py         two-tier memory (working + episodic)
 loadgen/
   generate.py       baseline traffic + on-demand chaos (your demo trigger)
-docker-compose.yml  local DB fleet + collector + prometheus + mimir + grafana
+k8s/                raw manifests, reconciled by ArgoCD
+docker-compose.yml  local DB fleet + collector + full LGTM stack + agent
 ```
 
 ## What each engine actually reports
@@ -113,8 +121,107 @@ Tiering SLOs by where a target actually lives is the point; a single global
 threshold would either flag every cloud instance forever or excuse a local
 one that's genuinely broken.
 
+## The AIOps agent
+
+An anomaly detector watches Mimir and hands anything unusual to a LangGraph
+agent, which investigates across all three signals and writes the incident up.
+
+```
+detector (rolling z-score on PromQL)
+        │  anomaly
+        ▼
+   recall ──▶ investigate ──▶ draft_rca ──▶ remember
+   (past      (PromQL /        (structured   (episodic
+   incidents)  LogQL /          verdict)      memory)
+               TraceQL /
+               SLO context)
+```
+
+```bash
+pip install -r requirements.txt
+
+python -m agent.main scan                    # one detector pass — no LLM calls at all
+python -m agent.main investigate pg-local    # investigate on demand
+python -m agent.main watch                   # detect and auto-investigate, continuously
+python -m agent.main memory                  # what it has learned so far
+python -m agent.main models                  # what your API key can reach
+```
+
+Or containerized, alongside the stack:
+
+```bash
+docker compose --profile agent up agent
+```
+
+### Cost
+
+**Zero.** The agent runs on Google Gemini's free tier — put a key from
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey) in `.env` as
+`GEMINI_API_KEY`. Argus is $0 end to end: infrastructure *and* inference.
+
+Without a key the agent still runs the detector and logs what it finds; only
+automatic root-cause analysis needs one. `python -m agent.main scan` is the
+command to try first — it exercises the whole telemetry path and spends
+nothing.
+
+### Detection
+
+A rolling z-score per instance per SLI: compare recent values against the
+mean and standard deviation of the preceding window. This is a complement to
+the SLO classification in `collector/`, not a replacement — the two catch
+different failures:
+
+| | fires when |
+|---|---|
+| SLO breach (`classify.py`) | a value crosses a fixed line we chose |
+| z-score (`detector.py`) | a value is unlike *its own* recent history |
+
+A target degrading *within* its budget trips only the detector. A dead cloud
+instance is critical forever but isn't news, so it trips only the SLO.
+
+It scores the recent **tail**, not just the newest sample — a 40-second spike
+checked a minute later has already recovered, and scoring one point would
+miss it entirely.
+
+### Investigation
+
+Four tools, one per question the agent needs answered:
+
+| Tool | Backend | Answers |
+|---|---|---|
+| `query_metrics` | Mimir (PromQL) | what changed, and when |
+| `query_logs` | Loki (LogQL) | why — the collector's own `status_reason` |
+| `query_traces` | Tempo (TraceQL) | the individual poll, as a span |
+| `get_slo_context` | `config.py` + `fleet.yaml` | what "bad" means for *this* instance |
+
+`get_slo_context` reads the collector's real thresholds rather than a copy,
+so the agent can't judge a value against numbers that have drifted from the
+ones that produced it. It matters: several hosted targets run deliberately
+widened budgets, so 300ms is fine on one instance and an incident on another.
+
+The tool loop is hand-written rather than delegated to the SDK, so every call
+is wrapped in an OpenTelemetry span. An investigation therefore shows up in
+Tempo as a trace — `agent.investigation` with one `agent.tool.*` child per
+query — sitting right next to the collector polls it was reasoning about. The
+agent is observable by the stack it observes.
+
+### Memory
+
+Two tiers:
+
+- **Working** — the turns and tool results of the current investigation, so
+  the agent builds on its last query instead of restarting.
+- **Episodic** — closed incidents on disk, recalled at the start of a later
+  investigation and ranked instance > same-engine > unrelated.
+
+Files and filtered recall, not a vector database. Recall here is filtered,
+not fuzzy: the question is always "what happened to this instance, or this
+engine, on this SLI, before?" — an exact-match query over a few labels. At
+this volume that beats an embedding index and adds no extra service to run.
+
 ## What's next
 
-See [`BUILD_PLAN.md`](BUILD_PLAN.md): structured logs into Loki,
-OpenTelemetry traces into Tempo, an anomaly detector + Claude/LangGraph RCA
-agent, then a Kubernetes (`kind`) deployment.
+Phases 1-4 are done — metrics, logs, traces, Kubernetes + ArgoCD, and the
+AIOps agent. See [`BUILD_PLAN.md`](BUILD_PLAN.md) for what each phase decided
+and why, including the tradeoffs taken honestly (single-binary Mimir/Loki/
+Tempo, no OTel Collector, no Alertmanager, files instead of pgvector).
