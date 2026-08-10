@@ -1090,25 +1090,63 @@ semantically like this narrative" becomes the actual question.
 Memory writes degrade gracefully: an unwritable directory returns `None`
 rather than raising, and a corrupt JSON file is skipped during recall.
 
-### 17.6 Verification status
+### 17.6 Verification status — verified end to end
 
-Verified against the live cluster **without any API key**, since the tools,
-detector, and memory need none:
+Fully verified against the live cluster with a real `GEMINI_API_KEY`: the
+agent detects a chaos-induced spike, investigates across all three backends,
+and reports the correct root cause at high confidence, citing
+`argus_conn_pct` 0.93, the matching `argus_status_level` 2, and the Loki line
+`status_reason: "connections 0.9 (1.0x slo)"`.
 
-- all four tools return real data from Mimir/Loki/Tempo;
-- malformed PromQL, an unknown instance, and an unknown tool all come back as
-  `{"error": ...}` instead of raising;
-- memory recall ranks instance > same-engine > unrelated correctly;
-- the detector caught a real chaos run — `conn_pct` on `pg-local` at 0.93,
-  7.3σ, correctly reported as already recovered — and reported clean at
-  baseline;
-- the LangGraph state machine runs `recall → investigate → draft_rca →
-  remember` end to end against a stubbed client, recalling precedent and
-  persisting the incident;
-- in-cluster, the agent pod runs detect-only without a key and immediately
-  flagged `argus_latency_ms` on `pg-local` at 12.2σ.
+Getting there took four real bugs, and they are the most instructive part of
+this phase — each produced a *plausible* wrong answer rather than an error.
 
-**Not yet verified: the model calls themselves.** That needs a
-`GEMINI_API_KEY`. Run `python -m agent.main models` first to confirm the key
-works and see which models it can reach, then
-`python -m agent.main investigate pg-local`.
+**1. Mimir was silently losing metrics.** The ring KV store was `memberlist`,
+a gossip protocol for coordinating multiple instances. In single-binary mode
+there is nobody to gossip with, so a lapsed heartbeat marked the only
+ingester unhealthy, and with `replication_factor: 1` nothing covered it.
+Prometheus remote_write then failed with *"at least 1 live replicas required,
+could only find 0"* — four times over two days, including one 254-minute hole
+that swallowed a chaos run whole. Fixed by switching to `inmemory`, which
+Loki's config already used and why Loki never showed the fault. Lesson: a
+component that is *usually* up produces gaps that look like application bugs.
+
+**2. Range results were truncated to the newest N points.** The agent widened
+its query to 6h to find an old spike; truncation cut the response back to the
+most recent ~30 minutes, so widening the window did nothing and the agent
+concluded the spike never occurred. Now downsampled *evenly across the whole
+window*, with a note saying so and warning that a spike shorter than the
+sampling interval can still hide.
+
+**3. The trigger carried a relative timestamp.** The detector wrote
+`"91s ago"` — true when written, stale by the time the agent ran. The agent
+anchored its queries on its own clock, correctly found nothing there, and
+declared the signal a false positive. Anomalies now carry an absolute
+timestamp (`at_unix`), and the prompt instructs the model to query around
+*that* time and to widen the window before concluding a signal is absent.
+Any value handed to an asynchronous consumer must be absolute.
+
+**4. Memory poisoning.** Bug 3's wrong "not observed" verdict was persisted
+as an incident, recalled on the next run, and cited back as corroborating
+evidence — promoting a low-confidence wrong answer to a **high-confidence**
+one. Two fixes: `remember` no longer persists investigations whose
+`root_cause_determined` is false (an unresolved case is an open question, not
+precedent), and the prompt states that precedent is a hypothesis to check,
+never evidence, and must never raise confidence.
+
+Bug 4 is the one worth remembering when building any agent with persistent
+memory: a memory tier turns a single wrong answer into a *self-reinforcing*
+one. Write-gating what earns the right to become precedent matters as much as
+the retrieval logic.
+
+Also verified without any API key (the tools, detector, and memory need
+none): all four tools return real data; malformed PromQL, an unknown
+instance, and an unknown tool all come back as `{"error": ...}` rather than
+raising; recall ranks instance > same-engine > unrelated; the detector
+reports clean at baseline and catches a real chaos run; the graph runs
+`recall → investigate → draft_rca → remember` against a stubbed client; and
+in-cluster the pod runs detect-only without a key rather than crash-looping.
+
+Free-tier rate limits (429) and transient 503s both appeared during testing
+and were absorbed by the exponential backoff in `_generate` without failing
+the investigation.
