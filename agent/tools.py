@@ -54,7 +54,14 @@ DECLARATIONS = [
                 "description": "True for a time series over a window (use this to see a "
                                "change over time); false for current values only.",
             },
-            "window": {"type": "string", "description": "Lookback for range queries, e.g. 15m, 2h."},
+            "window": {
+                "type": "string",
+                "description": "Lookback ending NOW — a plain duration only, e.g. 15m, "
+                               "2h, 1d. To inspect a past moment, keep this a plain "
+                               "duration wide enough to reach back to it, or anchor "
+                               "inside the query with PromQL's @ modifier, e.g. "
+                               "max_over_time(metric[5m] @ 1786369318).",
+            },
         },
         ["query"],
     ),

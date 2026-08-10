@@ -16,6 +16,7 @@ deviations above its own 30-minute mean" is defensible; a model score is not.
 
 from __future__ import annotations
 
+import datetime
 import statistics
 import time
 from dataclasses import dataclass
@@ -30,21 +31,27 @@ class Anomaly:
     metric: str
     z_score: float
     peak: float                  # the deviating value itself
-    seconds_ago: float           # when it happened — it may already have recovered
+    at_unix: float               # absolute time of the deviating sample
+    seconds_ago: float           # age at detection time — rots, so never the only signal
     baseline_mean: float
     baseline_stddev: float
     recovered: bool
 
     def describe(self) -> str:
         z = "infinite" if self.z_score == float("inf") else f"{self.z_score:.1f}"
-        when = (
-            f"{self.seconds_ago:.0f}s ago"
-            if self.seconds_ago >= 1 else "just now"
-        )
         state = "and has since recovered" if self.recovered else "and is ongoing"
+        # ABSOLUTE time, not just "N seconds ago": a trigger is consumed later
+        # than it is written — sometimes much later, if the agent is busy or
+        # rate-limited — and a relative offset silently rots. An agent that
+        # trusts a stale "91s ago" queries the wrong window and concludes the
+        # signal never happened. This was a real wrong RCA.
+        at = datetime.datetime.fromtimestamp(
+            self.at_unix, datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         return (
-            f"{self.metric} for {self.instance_id} hit {self.peak:.3g} {when} "
-            f"({z} standard deviations from its {config.DETECT_WINDOW} baseline "
+            f"{self.metric} for {self.instance_id} hit {self.peak:.3g} at {at} "
+            f"({self.seconds_ago:.0f}s before this alert was raised; "
+            f"{z} standard deviations from its {config.DETECT_WINDOW} baseline "
             f"of mean {self.baseline_mean:.3g}, stddev {self.baseline_stddev:.3g}) "
             f"{state}"
         )
@@ -101,6 +108,7 @@ def _z_scores(metric: str) -> list[Anomaly]:
             metric=metric,
             z_score=worst_z,
             peak=peak,
+            at_unix=ts,
             seconds_ago=max(0.0, now - ts),
             baseline_mean=mean,
             baseline_stddev=stddev,

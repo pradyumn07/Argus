@@ -54,6 +54,17 @@ Distinguish causes that matter. "Unreachable: AuthenticationError" is a credenti
 problem, not a database problem. A cross-region target sitting at its normal 300ms is \
 not an incident. A local container that jumped from 2ms to 500ms is.
 
+Alerts carry an absolute timestamp for when the deviation happened. Query around THAT \
+time, not around now — an investigation usually starts minutes after the event, and a \
+short window anchored on the present will miss it entirely. If a reported signal does \
+not appear, widen the window and use max_over_time before concluding it never \
+happened: a spike lasting seconds is invisible to a query whose step is coarser than \
+the spike.
+
+Prior incidents are hypotheses to check, never evidence. Do not cite a past incident as \
+proof about the present, and never let one raise your confidence — an earlier wrong \
+conclusion would otherwise compound into a confidently wrong one.
+
 If the evidence does not support a confident root cause, say so plainly and state what \
 you would need. A wrong confident answer is worse than an honest uncertain one."""
 
@@ -64,6 +75,8 @@ no markdown fence.
   "summary":        "one sentence: what happened, to which instance",
   "root_cause":     "the cause you can defend from the evidence, or an explicit \
 statement that it is undetermined and why",
+  "root_cause_determined": true if you identified an actual cause, false if it \
+remains undetermined. False is a perfectly good answer — say it here, not only in prose,
   "evidence":       ["specific retrieved facts — values, log lines, trace ids"],
   "breached_slis":  ["latency_ms" | "err_rate" | "conn_pct" | "storage_pct" | \
 "cache_hit_ratio" | "availability"],
@@ -233,6 +246,13 @@ def node_remember(state: State, deps: AgentDeps) -> State:
     rca = state.get("rca") or {}
     if state.get("error") or not rca.get("root_cause"):
         return {}  # never persist a failed or empty investigation as precedent
+    if rca.get("root_cause_determined") is False:
+        # An unresolved investigation is not precedent — it is an open question.
+        # Persisting it lets a wrong "not observed" come back as corroboration
+        # and raise confidence on the next run. Observed happening: a bad RCA
+        # was recalled and cited as evidence, turning low confidence into high.
+        log.info("root cause undetermined — not saving as precedent")
+        return {}
     incident = Incident(
         instance_id=state["instance_id"],
         engine=state.get("engine", "?"),
