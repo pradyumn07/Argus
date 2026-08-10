@@ -1,51 +1,24 @@
 apiVersion: v1
 data:
-  mimir.yaml: |
-    # Mimir single-binary ("monolithic") mode for local/demo use â€” filesystem
-    # storage, replication_factor 1. Not how you'd run Mimir at scale (that's
-    # mimir-distributed + object storage + RF 3), but functionally identical
-    # for a single fleet this size. See BUILD_PLAN.md for the tradeoff.
-
-    multitenancy_enabled: false
-
-    server:
-      http_listen_port: 9009
-      log_level: info
-
-    blocks_storage:
-      backend: filesystem
-      filesystem:
-        dir: /data/blocks
-      tsdb:
-        dir: /data/tsdb
-
-    compactor:
-      data_dir: /data/compactor
-      sharding_ring:
-        kvstore:
-          store: memberlist
-
-    distributor:
-      ring:
-        instance_addr: 127.0.0.1
-        kvstore:
-          store: memberlist
-
-    ingester:
-      ring:
-        instance_addr: 127.0.0.1
-        kvstore:
-          store: memberlist
-        replication_factor: 1
-
-    store_gateway:
-      sharding_ring:
-        replication_factor: 1
-
-    ruler_storage:
-      backend: filesystem
-      filesystem:
-        dir: /data/ruler
+  mimir.yaml: "# Mimir single-binary (\"monolithic\") mode for local/demo use â€” filesystem\r\n#
+    storage, replication_factor 1. Not how you'd run Mimir at scale (that's\r\n# mimir-distributed
+    + object storage + RF 3), but functionally identical\r\n# for a single fleet this
+    size. See BUILD_PLAN.md for the tradeoff.\r\n\r\n# Ring KV store is `inmemory`,
+    not `memberlist`. Memberlist is a gossip\r\n# protocol for coordinating MULTIPLE
+    instances; in single-binary mode there is\r\n# nobody to gossip with, so a lapsed
+    heartbeat marks the only ingester\r\n# unhealthy and â€” with replication_factor
+    1 â€” there is no replica to cover it.\r\n# That produced real, repeated data loss:
+    Prometheus remote_write returned\r\n# \"at least 1 live replicas required, could
+    only find 0\" four times across two\r\n# days, each one a hole in the metrics.
+    Loki's config already used inmemory and\r\n# stayed stable throughout.\r\n\r\nmultitenancy_enabled:
+    false\r\n\r\nserver:\r\n  http_listen_port: 9009\r\n  log_level: info\r\n\r\nblocks_storage:\r\n
+    \ backend: filesystem\r\n  filesystem:\r\n    dir: /data/blocks\r\n  tsdb:\r\n
+    \   dir: /data/tsdb\r\n\r\ncompactor:\r\n  data_dir: /data/compactor\r\n  sharding_ring:\r\n
+    \   kvstore:\r\n      store: inmemory\r\n\r\ndistributor:\r\n  ring:\r\n    instance_addr:
+    127.0.0.1\r\n    kvstore:\r\n      store: inmemory\r\n\r\ningester:\r\n  ring:\r\n
+    \   instance_addr: 127.0.0.1\r\n    kvstore:\r\n      store: inmemory\r\n    replication_factor:
+    1\r\n\r\nstore_gateway:\r\n  sharding_ring:\r\n    replication_factor: 1\r\n\r\nruler_storage:\r\n
+    \ backend: filesystem\r\n  filesystem:\r\n    dir: /data/ruler\r\n"
 kind: ConfigMap
 metadata:
   name: argus-mimir-config

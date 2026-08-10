@@ -3,6 +3,15 @@
 # mimir-distributed + object storage + RF 3), but functionally identical
 # for a single fleet this size. See BUILD_PLAN.md for the tradeoff.
 
+# Ring KV store is `inmemory`, not `memberlist`. Memberlist is a gossip
+# protocol for coordinating MULTIPLE instances; in single-binary mode there is
+# nobody to gossip with, so a lapsed heartbeat marks the only ingester
+# unhealthy and — with replication_factor 1 — there is no replica to cover it.
+# That produced real, repeated data loss: Prometheus remote_write returned
+# "at least 1 live replicas required, could only find 0" four times across two
+# days, each one a hole in the metrics. Loki's config already used inmemory and
+# stayed stable throughout.
+
 multitenancy_enabled: false
 
 server:
@@ -20,19 +29,19 @@ compactor:
   data_dir: /data/compactor
   sharding_ring:
     kvstore:
-      store: memberlist
+      store: inmemory
 
 distributor:
   ring:
     instance_addr: 127.0.0.1
     kvstore:
-      store: memberlist
+      store: inmemory
 
 ingester:
   ring:
     instance_addr: 127.0.0.1
     kvstore:
-      store: memberlist
+      store: inmemory
     replication_factor: 1
 
 store_gateway:

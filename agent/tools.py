@@ -103,14 +103,40 @@ TOOLS = [types.Tool(function_declarations=DECLARATIONS)]
 
 # ── Dispatch ──────────────────────────────────────────────────────────
 
+def _downsample(points: list, limit: int = MAX_POINTS) -> tuple[list, bool]:
+    """Thin a series to `limit` points spread across the WHOLE window.
+
+    Emphatically not "keep the newest N": that silently shrinks the window the
+    caller asked for. It produced a real wrong answer — the agent widened its
+    query to 6h to find a spike, truncation cut the result back to the most
+    recent ~30 minutes, and the agent concluded the spike never happened.
+
+    Even sampling keeps the shape and the extremes of the requested range, so
+    widening the window actually widens what the model sees.
+    """
+    if len(points) <= limit:
+        return points, False
+    step = (len(points) - 1) / (limit - 1)
+    idx = sorted({round(i * step) for i in range(limit)} | {0, len(points) - 1})
+    return [points[i] for i in idx], True
+
+
 def _query_metrics(query: str, range: bool = False, window: str = "30m") -> Any:
     if range:
         series = clients.promql_range(query, window=window)[:MAX_SERIES]
         for s in series:
             pts = s["values"]
-            # Keep the newest points — an incident is at the end of the window.
-            s["values"] = pts[-MAX_POINTS:]
-            s["points_omitted"] = max(0, len(pts) - MAX_POINTS)
+            kept, thinned = _downsample(pts)
+            s["values"] = kept
+            if thinned:
+                # Say so explicitly — a thinned series can hide a spike
+                # narrower than the sampling interval.
+                s["note"] = (
+                    f"downsampled evenly from {len(pts)} to {len(kept)} points across "
+                    f"the full {window} window; a spike shorter than "
+                    f"~{len(pts) // len(kept)} samples may not appear. Narrow the "
+                    f"window for full resolution, or use max_over_time()."
+                )
         return series
     return clients.promql_instant(query)[:MAX_SERIES]
 
