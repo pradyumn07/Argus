@@ -33,7 +33,7 @@ load_dotenv()
 from agent import clients, config, detector  # noqa: E402
 from agent.graph import AgentDeps, investigate, make_client  # noqa: E402
 from agent.memory import EpisodicMemory  # noqa: E402
-from agent.slo import slo_context  # noqa: E402
+from agent.slo import locations, slo_context  # noqa: E402
 
 log = logging.getLogger("argus.ui")
 STATIC = Path(__file__).parent / "static"
@@ -82,6 +82,12 @@ def api_fleet() -> JSONResponse:
                     entry[field] = None
         except clients.TelemetryError as exc:
             log.warning("fleet query %s failed: %s", query, exc)
+
+    # Geography for the world map, joined from fleet.yaml.
+    geo = locations()
+    for iid, entry in fleet.items():
+        if iid in geo:
+            entry["location"] = geo[iid]
 
     # An unreachable target still reports status=2 but has no latency at all —
     # surface that explicitly so the UI can say "unreachable" instead of "0ms".

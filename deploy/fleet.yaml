@@ -23,6 +23,10 @@ defaults:
   poll_interval_s: 4
   region: local
   provider: docker
+  # Where the local containers physically run — used only by the UI world
+  # map, never by the collector. CHANGE THIS to wherever you run Argus;
+  # `region: local` says "this machine", and only you know where that is.
+  location: { label: "Local — this machine", lat: 12.97, lon: 77.59 }
 
 targets:
   # ── Local fleet (Docker Hub images, always available) ───────────────
@@ -58,6 +62,8 @@ targets:
     provider: neon
     region: us-east
     dsn: ${NEON_DSN}
+    # us-east-2 comes from the DSN itself (…c-4.us-east-2.aws.neon.tech).
+    location: { label: "AWS us-east-2 · Ohio", lat: 40.42, lon: -82.91 }
     slo:
       # Neon free tier is cross-region from here and cold-starts on idle;
       # a 50ms budget would flag it permanently for latency it cannot control.
@@ -68,6 +74,7 @@ targets:
     provider: supabase
     region: us-east
     dsn: ${SUPA_DSN}
+    location: { label: "AWS us-east-1 · N. Virginia", lat: 38.03, lon: -78.48 }
     slo:
       latency_ms: { warn: 400, crit: 1200 }  # same cross-region reasoning as pg-neon
 
@@ -77,6 +84,7 @@ targets:
     region: us-east
     database: orders
     dsn: ${MONGO_URI}
+    location: { label: "AWS us-east-1 · N. Virginia", lat: 38.03, lon: -78.48 }
     poll_interval_s: 3
     slo:
       # Atlas M0 shared tier, cross-region: ~90ms is its healthy baseline.
@@ -88,6 +96,7 @@ targets:
     region: us-east
     database: catalog
     dsn: ${MONGO_URI}
+    location: { label: "AWS us-east-1 · N. Virginia", lat: 38.03, lon: -78.48 }
     poll_interval_s: 3
     slo:
       latency_ms: { warn: 250, crit: 600 }  # same M0 shared-tier reasoning
@@ -97,6 +106,7 @@ targets:
     provider: upstash
     region: us-east
     dsn: ${REDIS_CACHE_URL}
+    location: { label: "AWS us-east-1 · N. Virginia", lat: 38.03, lon: -78.48 }
     poll_interval_s: 2
     slo:
       # Upstash free tier over TLS from here; 10ms is a LAN budget, not a WAN one.
@@ -107,6 +117,7 @@ targets:
     provider: upstash
     region: us-east
     dsn: ${REDIS_SESSION_URL}
+    location: { label: "AWS us-east-1 · N. Virginia", lat: 38.03, lon: -78.48 }
     poll_interval_s: 2
     slo:
       latency_ms: { warn: 120, crit: 400 }  # same WAN reasoning as redis-cache

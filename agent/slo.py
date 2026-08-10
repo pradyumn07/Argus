@@ -115,3 +115,21 @@ def slo_context(instance_id: str) -> dict:
             "numbers, not against the engine defaults."
         ),
     }
+
+
+def locations() -> dict[str, dict]:
+    """{instance_id: {label, lat, lon}} for every target that declares one.
+
+    UI-only metadata — the collector never reads it, and it is deliberately
+    not a metric label (a coordinate is not a dimension you group by).
+    """
+    out = {}
+    for iid, target in _targets().items():
+        loc = target.get("location") or {}
+        if loc.get("lat") is not None and loc.get("lon") is not None:
+            out[iid] = {
+                "label": loc.get("label", target.get("region", "")),
+                "lat": float(loc["lat"]),
+                "lon": float(loc["lon"]),
+            }
+    return out

@@ -158,6 +158,38 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .ramp { display:flex; gap:2px; align-items:center; }
 .ramp .sw { width:15px; height:11px; border-radius:2px; }
 
+
+/* ── World map ──────────────────────────────────────────────────────── */
+.map-card { position:relative; overflow:hidden; }
+.mapwrap { position:relative; width:100%; }
+svg.map { width:100%; height:auto; max-height:430px; display:block; margin:0 auto; }
+svg.map .land {
+  fill:var(--surface-3); stroke:var(--grid); stroke-width:1;
+  vector-effect:non-scaling-stroke;
+}
+svg.map .grat { stroke:var(--grid); stroke-width:.4; fill:none; opacity:.5;
+                vector-effect:non-scaling-stroke; }
+.site { cursor:pointer; }
+.site .halo { fill:none; stroke-width:4; opacity:0; transform-origin:center;
+              transform-box:fill-box; }
+.site.alive .halo { animation:radar 3s ease-out infinite; }
+@keyframes radar {
+  0%   { r:14; opacity:.5 }
+  100% { r:64; opacity:0 }
+}
+.site .core { stroke:var(--surface-2); stroke-width:4; transition:r .2s; }
+.site:hover .core { r:24; }
+.site .cap { fill:var(--ink-2); font-size:21px; text-anchor:middle; font-weight:500;
+             paint-order:stroke; stroke:var(--surface-2); stroke-width:6px; }
+.site .cnt { fill:#fff; font-size:17px; font-weight:700; text-anchor:middle;
+             dominant-baseline:central; pointer-events:none; }
+.arc { fill:none; stroke:var(--accent); stroke-width:2.5; opacity:.4;
+       stroke-dasharray:9 13; animation:dash 22s linear infinite; }
+@keyframes dash { to { stroke-dashoffset:-160 } }
+.maplegend { position:absolute; left:16px; bottom:12px; display:flex; gap:13px;
+             font-size:11.5px; color:var(--ink-muted); background:var(--surface-2);
+             padding:5px 10px; border-radius:999px; border:1px solid var(--ring); }
+
 /* ── Tooltip ────────────────────────────────────────────────────────── */
 #tip {
   position:fixed; z-index:60; pointer-events:none; opacity:0;
@@ -242,6 +274,21 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; }
 
   <section class="tiles" id="tiles"></section>
 
+
+  <section class="card map-card">
+    <div class="card-head">
+      <div>
+        <h2>Where the fleet lives</h2>
+        <p class="desc">Marker size is instance count; colour is the worst SLO status at
+           that site. Locations come from <code>deploy/fleet.yaml</code>.</p>
+      </div>
+    </div>
+    <div class="mapwrap"><svg class="map" id="map" viewBox="0 40 2000 800"
+         preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="World map of monitored database locations"></svg></div>
+    <div class="maplegend" id="maplegend"></div>
+  </section>
+
   <section class="card">
     <div class="card-head">
       <div>
@@ -319,6 +366,8 @@ $('#theme').onclick = () => {
   root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
   draw();
 };
+
+
 
 /* ── Tooltip ───────────────────────────────────────────────────────── */
 const tip = $('#tip');
@@ -447,7 +496,7 @@ async function draw() {
   if (!$('#target').options.length) {
     $('#target').innerHTML = f.map(x => `<option>${x.instance_id}</option>`).join('');
   }
-  tiles(); drawHeatmap(); table();
+  tiles(); drawHeatmap(); table(); drawMap();
   $('#tick').textContent = 'live · ' + new Date().toLocaleTimeString();
 }
 
@@ -535,6 +584,95 @@ function renderRCA(r) {
         <ul>${r.evidence.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`:''}
       <div class="lbl">Recommendation</div><div>${esc(r.recommendation||'—')}</div>
     </div>`;
+}
+
+
+/* ── World map ─────────────────────────────────────────────────────── */
+let world = null;
+const proj = (lat, lon) => [ (lon + 180) / 360 * 2000, (90 - lat) / 180 * 1000 ];
+
+async function drawMap() {
+  if (!world) world = await fetch('/static/world.json').then(r => r.json());
+  const svg = $('#map');
+
+  // Group instances by site so co-located targets share one marker.
+  const sites = {};
+  fleet.filter(f => f.location).forEach(f => {
+    const k = f.location.lat + ',' + f.location.lon;
+    (sites[k] = sites[k] || {loc: f.location, items: []}).items.push(f);
+  });
+  const list = Object.values(sites).sort((a,b) => b.items.length - a.items.length);
+  if (!list.length) { svg.innerHTML = ''; return; }
+
+  const grat = [];
+  for (let lat = -60; lat <= 60; lat += 30) {
+    const [,y] = proj(lat, 0); grat.push(`M0 ${y}H2000`);
+  }
+  for (let lon = -150; lon <= 150; lon += 30) {
+    const [x] = proj(0, lon); grat.push(`M${x} 0V1000`);
+  }
+
+  // Great-circle-ish arcs from the local site to each remote one: this fleet
+  // really is monitored across an ocean, and the arc is what says so.
+  const home = list.find(s => s.items.some(i => i.provider === 'docker'));
+  const arcs = home ? list.filter(s => s !== home).map(s => {
+    const [x1,y1] = proj(home.loc.lat, home.loc.lon), [x2,y2] = proj(s.loc.lat, s.loc.lon);
+    const mx = (x1+x2)/2, my = (y1+y2)/2 - Math.abs(x2-x1) * 0.22;
+    return `<path class="arc" d="M${x1} ${y1}Q${mx} ${my} ${x2} ${y2}"/>`;
+  }).join('') : '';
+
+  // Cloud regions cluster tightly (us-east-1 and us-east-2 are ~25 units
+  // apart at this projection), so labels stack instead of overlapping.
+  const placed = [];
+  const marks = list.map(s => {
+    const worst = Math.max(...s.items.map(i => i.status ?? 0));
+    const st = STATUS[worst] || 'good';
+    const [x,y] = proj(s.loc.lat, s.loc.lon);
+    const r = 13 + Math.min(9, s.items.length * 1.6);
+    const alive = s.items.some(i => !i.unreachable);
+
+    let ly = r + 26;
+    while (placed.some(p => Math.abs(p.x - x) < 300 && Math.abs(p.y - (y + ly)) < 26))
+      ly += 27;
+    placed.push({x, y: y + ly});
+
+    // Leader line when the label had to move clear of its marker.
+    const leader = ly > r + 30
+      ? `<line x1="0" y1="${r + 4}" x2="0" y2="${ly - 16}"
+               stroke="var(--rule)" stroke-width="1.5"/>` : '';
+
+    return `<g class="site ${alive?'alive':''}" data-k="${s.loc.lat},${s.loc.lon}"
+              transform="translate(${x} ${y})">
+        <circle class="halo" r="14" stroke="var(--${st})"/>
+        ${leader}
+        <circle class="core" r="${r}" fill="var(--${st})"/>
+        <text class="cnt" y="1">${s.items.length}</text>
+        <text class="cap" y="${ly}">${s.loc.label}</text>
+      </g>`;
+  }).join('');
+
+  svg.innerHTML = `<path class="grat" d="${grat.join('')}"/>
+     <path class="land" d="${world.d}"/>${arcs}${marks}`;
+
+  svg.querySelectorAll('.site').forEach(g => {
+    const s = sites[g.dataset.k];
+    g.onmousemove = e => showTip(e,
+      `<div class="t">${s.loc.label}</div>` +
+      s.items.map(i => {
+        const st = STATUS[i.status ?? 0] || 'good';
+        const v = i.unreachable ? 'unreachable'
+                : i.latency_ms != null ? i.latency_ms.toFixed(0) + ' ms' : '—';
+        return `<div class="r"><span style="color:var(--${st})">${GLYPH[st]}</span>
+                <span style="flex:1">${i.instance_id}</span><b>${v}</b></div>`;
+      }).join(''));
+    g.onmouseleave = hideTip;
+    g.onclick = () => { $('#target').value = s.items[0].instance_id; $('#go').click(); };
+  });
+
+  const n = list.length, remote = list.filter(s => s !== home).length;
+  $('#maplegend').innerHTML =
+    `<span>${n} site${n>1?'s':''}</span><span>${remote} cross-region</span>` +
+    STATUS.map(s => `<span><span style="color:var(--${s})">${GLYPH[s]}</span> ${s}</span>`).join('');
 }
 
 /* ── Controls ──────────────────────────────────────────────────────── */
