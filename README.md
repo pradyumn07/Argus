@@ -68,6 +68,12 @@ five databases (Postgres, MySQL, Mongo, two Redis) plus:
   - **Argus Fleet** — overview stats, status timeline, all six SLIs, filterable by engine/provider
   - **Argus — Instance Detail** — per-instance drill-down via an `$instance` variable
 
+- **Loki** — `localhost:3100`, logs; **Alloy** tails every container into it
+- **Tempo** — `localhost:3200`, traces; the collector posts OTLP to `:4318`
+
+All three are wired into Grafana as datasources, with links between them —
+a log line jumps to its trace, a trace jumps back to the instance's metrics.
+
 To also monitor free-tier cloud instances, `cp .env.example .env` and fill in
 whichever connection strings you have. Anything left unset is skipped.
 
@@ -75,6 +81,19 @@ Confirm it's working:
 ```bash
 curl localhost:9100/metrics | grep argus_
 ```
+
+### The live UI
+
+```bash
+docker compose --profile ui up ui        # then open localhost:8080
+```
+
+A dashboard built for the one thing Grafana can't show: **the agent
+investigating, live**. Fleet heatmap (status or latency, log-scaled), a world
+map of where each instance physically runs, z-score anomaly cards, and an SSE
+stream of every tool call the agent makes on its way to an RCA. Every number
+on it is fetched from Mimir/Loki/Tempo at request time — see
+[`ARCHITECTURE.md` §18-19](ARCHITECTURE.md).
 
 ## Generate load and demo a failure
 
@@ -221,7 +240,12 @@ this volume that beats an embedding index and adds no extra service to run.
 
 ## What's next
 
-Phases 1-4 are done — metrics, logs, traces, Kubernetes + ArgoCD, and the
-AIOps agent. See [`BUILD_PLAN.md`](BUILD_PLAN.md) for what each phase decided
-and why, including the tradeoffs taken honestly (single-binary Mimir/Loki/
-Tempo, no OTel Collector, no Alertmanager, files instead of pgvector).
+Phases 1-4 are done — metrics, logs, traces, Kubernetes + ArgoCD, the AIOps
+agent, and the live UI. See [`BUILD_PLAN.md`](BUILD_PLAN.md) for what each
+phase decided and why, including the tradeoffs taken honestly (single-binary
+Mimir/Loki/Tempo, no OTel Collector, no Alertmanager, files instead of
+pgvector).
+
+Three cloud targets currently have broken credentials (`ARCHITECTURE.md` §10)
+— by design that costs nothing: `fleet.yaml` skips any target whose env vars
+don't resolve, and the other eight keep reporting.
